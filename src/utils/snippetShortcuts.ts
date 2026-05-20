@@ -804,6 +804,13 @@ export function registerCompletionProvider(
 // ────────────────────────────────────────────────────────────
 // Tab-key expansion — call once per editor instance
 // ────────────────────────────────────────────────────────────
+
+/** HTML void (self-closing) tags — ไม่ต้องมี closing tag */
+const VOID_TAGS = new Set([
+  'area','base','br','col','embed','hr','img','input',
+  'link','meta','param','source','track','wbr',
+]);
+
 export function registerTabExpansion(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   editor: any,
@@ -831,6 +838,36 @@ export function registerTabExpansion(
     const lineContent: string = model.getLineContent(position.lineNumber);
     const textBefore = lineContent.substring(0, position.column - 1).trimStart();
 
+    // ── 1. HTML tag auto-close (Emmet-like) ─────────────────
+    // พิมพ์ <table แล้วกด Tab → <table></table> cursor อยู่ข้างใน
+    if (monacoLang === 'html' || monacoLang === 'htm') {
+      // ตรวจว่าบรรทัดลงท้ายด้วย <tagname หรือ <tagname attributes
+      const tagMatch = textBefore.match(/<([a-zA-Z][a-zA-Z0-9-]*)([^>]*)$/);
+      if (tagMatch) {
+        const tag  = tagMatch[1];
+        const attrs = tagMatch[2] ?? '';
+        const deleteLen = 1 + tag.length + attrs.length; // '<' + tagname + attrs
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const ctrl = editor.getContribution('snippetController2') as any;
+        if (VOID_TAGS.has(tag.toLowerCase())) {
+          // Self-closing: <br, <img, <input → เติม > เท่านั้น
+          ctrl?.insert(`${attrs}>$0`, { overwriteBefore: attrs.length });
+        } else {
+          // Normal tag: แทน <tagname... ด้วย <tagname...>cursor</tagname>
+          ctrl?.insert(
+            `<${tag}${attrs}>$1</${tag}>$0`,
+            { overwriteBefore: deleteLen }
+          );
+        }
+        return;
+      }
+    }
+
+    // ── 2. !snippet trigger ────────────────────────────
     const snippets = getSnippetsForLang(monacoLang, getCustomSnippets());
 
     // Find the longest matching trigger

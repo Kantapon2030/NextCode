@@ -359,7 +359,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* ── Drop Zone ── */}
+        {/* ── Drop Zone (compact) ── */}
         <div
           onDragEnter={(e) => { e.preventDefault(); setIsDragOver(true); }}
           onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
@@ -368,46 +368,37 @@ export default function Dashboard() {
           }}
           onDrop={async (e) => { e.preventDefault(); await handleImportFiles(e.dataTransfer); }}
           onClick={() => folderInputRef.current?.click()}
-          className={`relative flex flex-col items-center justify-center gap-3 mb-6 p-8 rounded-2xl border-2 border-dashed cursor-pointer transition-all duration-200 ${
+          className={`flex items-center gap-3 mb-5 px-4 py-3 rounded-xl border border-dashed cursor-pointer transition-all duration-200 ${
             isDragOver
-              ? 'border-primary-400 bg-primary-900/20 scale-[1.01]'
-              : 'border-border hover:border-primary-600/50 hover:bg-surface-800/40'
+              ? 'border-primary-400 bg-primary-900/20'
+              : 'border-border hover:border-primary-600/50 hover:bg-surface-800/30'
           }`}
         >
           {importing ? (
             <>
-              <Loader2 className="w-10 h-10 text-primary-400 animate-spin" />
-              <p className="text-sm text-primary-300 font-medium">กำลังนำเข้า...</p>
-              {importProgress && (
-                <p className="text-xs text-zinc-500 max-w-sm truncate text-center">{importProgress}</p>
-              )}
+              <Loader2 className="w-5 h-5 text-primary-400 animate-spin shrink-0" />
+              <span className="text-sm text-primary-300 font-medium flex-1 truncate">
+                {importProgress || 'กำลังนำเข้า...'}
+              </span>
             </>
           ) : (
             <>
-              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-colors ${
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-colors ${
                 isDragOver ? 'bg-primary-600' : 'bg-surface-700'
               }`}>
-                <FolderInput className={`w-7 h-7 ${isDragOver ? 'text-white' : 'text-primary-400'}`} />
+                <FolderInput className={`w-4 h-4 ${isDragOver ? 'text-white' : 'text-primary-400'}`} />
               </div>
-              <div className="text-center">
-                <p className="text-sm font-semibold text-white">
-                  {isDragOver ? '🎯 วางไฟล์ที่นี่เลย!' : 'ลากไฟล์หรือโฟลเดอร์มาวางที่นี่'}
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-white">
+                  {isDragOver ? '🎯 วางไฟล์ที่นี่เลย!' : 'ลากโฟลเดอร์หรือไฟล์มาวางเพื่อสร้างโปรเจกต์'}
                 </p>
-                <p className="text-xs text-zinc-500 mt-1">
-                  รองรับทุกไฟล์: HTML, CSS, JS, Python, C/C++, รูปภาพ · โยนทั้งโฟลเดอร์ได้เลย
+                <p className="text-xs text-zinc-600 truncate">
+                  HTML · CSS · JS · Python · C/C++ · รูปภาพ · รองรับทั้งโฟลเดอร์
                 </p>
               </div>
-              <div className="flex items-center gap-2 text-xs text-zinc-600">
-                <span className="px-2 py-1 bg-surface-700 rounded-lg">HTML</span>
-                <span className="px-2 py-1 bg-surface-700 rounded-lg">CSS</span>
-                <span className="px-2 py-1 bg-surface-700 rounded-lg">JS</span>
-                <span className="px-2 py-1 bg-surface-700 rounded-lg">Python</span>
-                <span className="px-2 py-1 bg-surface-700 rounded-lg">C/C++</span>
-                <span className="px-2 py-1 bg-surface-700 rounded-lg">รูปภาพ</span>
-              </div>
+              <span className="text-xs text-zinc-600 shrink-0 hidden sm:block">คลิกเพื่อเลือก</span>
             </>
           )}
-          {/* hidden folder input */}
           <input
             ref={folderInputRef}
             type="file"
@@ -418,6 +409,7 @@ export default function Dashboard() {
             className="hidden"
             onChange={handleFolderInputChange}
           />
+
         </div>
 
         {loading ? (

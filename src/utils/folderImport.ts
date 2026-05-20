@@ -9,47 +9,47 @@ export interface ImportedFile {
   file: File;
 }
 
-/** อ่าน FileSystemEntry แบบ recursive */
-async function readEntry(
-  entry: FileSystemEntry,
-  basePath = ''
-): Promise<ImportedFile[]> {
-  const results: ImportedFile[] = [];
+// ─── Internal: อ่านเนื้อหา DirectoryEntry แบบ recursive ──────
 
-  if (entry.isFile) {
-    const file = await new Promise<File>((resolve, reject) =>
-      (entry as FileSystemFileEntry).file(resolve, reject)
+async function readDirectoryContents(
+  dir: FileSystemDirectoryEntry,
+  basePath: string,
+  results: ImportedFile[]
+): Promise<void> {
+  const reader = dir.createReader();
+  let batch: FileSystemEntry[];
+  do {
+    batch = await new Promise<FileSystemEntry[]>((resolve, reject) =>
+      reader.readEntries(resolve, reject)
     );
-    const path = basePath ? `${basePath}/${entry.name}` : entry.name;
-    results.push({ path, file });
-  } else if (entry.isDirectory) {
-    const dir = entry as FileSystemDirectoryEntry;
-    const reader = dir.createReader();
-    const dirPath = basePath ? `${basePath}/${entry.name}` : entry.name;
-
-    // readEntries คืนสูงสุด 100 entries ต่อครั้ง — ต้อง loop จนหมด
-    let batch: FileSystemEntry[] = [];
-    do {
-      batch = await new Promise<FileSystemEntry[]>((resolve, reject) =>
-        reader.readEntries(resolve, reject)
-      );
-      for (const child of batch) {
-        const sub = await readEntry(child, dirPath);
-        results.push(...sub);
+    for (const entry of batch) {
+      const entryPath = basePath ? `${basePath}/${entry.name}` : entry.name;
+      if (entry.isFile) {
+        const file = await new Promise<File>((resolve, reject) =>
+          (entry as FileSystemFileEntry).file(resolve, reject)
+        );
+        results.push({ path: entryPath, file });
+      } else if (entry.isDirectory) {
+        await readDirectoryContents(entry as FileSystemDirectoryEntry, entryPath, results);
       }
-    } while (batch.length > 0);
-  }
-
-  return results;
+    }
+  } while (batch.length > 0);
 }
 
-/** อ่านไฟล์ทั้งหมดจาก DataTransfer (drag & drop) */
+// ─── Public API ───────────────────────────────────────────────
+
+/**
+ * อ่านไฟล์ทั้งหมดจาก DataTransfer (drag & drop)
+ * - Drop โฟลเดอร์เดียว → ตัด root folder name ออก
+ *   เช่น "Kantapon2030.github.io-main/data.js" → "data.js"
+ *   และ "Kantapon2030.github.io-main/picture/a.jpg" → "picture/a.jpg"
+ * - Drop หลายไฟล์/โฟลเดอร์ → เก็บ path ตามปกติ
+ */
 export async function readDroppedItems(
   dataTransfer: DataTransfer
 ): Promise<ImportedFile[]> {
   const results: ImportedFile[] = [];
 
-  // ใช้ items API (รองรับโฟลเดอร์)
   if (dataTransfer.items && dataTransfer.items.length > 0) {
     const entries: FileSystemEntry[] = [];
     for (let i = 0; i < dataTransfer.items.length; i++) {
@@ -63,25 +63,42 @@ export async function readDroppedItems(
           : null;
       if (entry) entries.push(entry);
     }
-    for (const entry of entries) {
-      const sub = await readEntry(entry, '');
-      results.push(...sub);
+
+    if (entries.length === 1 && entries[0].isDirectory) {
+      // Drop โฟลเดอร์เดียว → อ่านเนื้อหาโดยไม่รวมชื่อ root folder
+      await readDirectoryContents(entries[0] as FileSystemDirectoryEntry, '', results);
+    } else {
+      // Drop หลายไฟล์/โฟลเดอร์
+      for (const entry of entries) {
+        if (entry.isFile) {
+          const file = await new Promise<File>((resolve, reject) =>
+            (entry as FileSystemFileEntry).file(resolve, reject)
+          );
+          results.push({ path: entry.name, file });
+        } else if (entry.isDirectory) {
+          // หลายโฟลเดอร์ → เก็บชื่อโฟลเดอร์ย่อยไว้ เช่น picture/photo.jpg
+          await readDirectoryContents(entry as FileSystemDirectoryEntry, entry.name, results);
+        }
+      }
     }
     return results;
   }
 
-  // Fallback: files API (รองรับแค่ไฟล์เดี่ยว)
+  // Fallback: files API (ไม่รองรับโฟลเดอร์ใน Firefox)
   if (dataTransfer.files) {
     for (let i = 0; i < dataTransfer.files.length; i++) {
       const file = dataTransfer.files[i];
-      results.push({ path: file.name, file });
+      // webkitRelativePath = "folder/sub/file.js" → ตัด root folder ออก
+      const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+      const path = rel ? rel.split('/').slice(1).join('/') || file.name : file.name;
+      results.push({ path, file });
     }
   }
 
   return results;
 }
 
-// ─── Content type helpers ─────────────────────────────────────
+// ─── Content-type helpers ─────────────────────────────────────
 
 const IMAGE_EXTS = new Set(['png','jpg','jpeg','gif','webp','svg','ico','bmp','avif']);
 const TEXT_EXTS  = new Set([
