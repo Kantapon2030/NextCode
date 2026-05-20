@@ -1,0 +1,249 @@
+@import url('https://fonts.googleapis.com/css2?family=Sarabun:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── CSS Variables ─────────────────────────── */
+:root {
+  --bg-primary: #0f0f0f;
+  --bg-surface: #1a1a1a;
+  --bg-border: #2a2a2a;
+  --accent: #6366f1;
+  --text-primary: #e4e4e7;
+  --success: #22c55e;
+  --error: #ef4444;
+  --warning: #f59e0b;
+}
+
+/* ─── Base ────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  height: 100%;
+  font-family: 'Sarabun', 'Inter', system-ui, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ─── Scrollbar ───────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #4a4a4a;
+}
+
+/* ─── Light mode overrides ────────────────────── */
+.light {
+  --bg-primary: #f8f8fc;
+  --bg-surface: #ffffff;
+  --bg-border: #e4e4e7;
+  --text-primary: #18181b;
+}
+.light body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+.light ::-webkit-scrollbar-thumb {
+  background: #d4d4d8;
+}
+
+/* ─── Monaco Editor override ──────────────────── */
+.monaco-editor .margin {
+  background: transparent !important;
+}
+
+/* ─── Resizer handle ─────────────────────────── */
+.resizer {
+  background: var(--bg-border);
+  transition: background 0.2s;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+}
+.resizer:hover, .resizer.dragging {
+  background: var(--accent);
+}
+.resizer-v {
+  width: 4px;
+  cursor: col-resize;
+}
+.resizer-h {
+  height: 4px;
+  cursor: row-resize;
+}
+
+/* ─── Glassmorphism card ──────────────────────── */
+.glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ─── Glow button ─────────────────────────────── */
+.btn-glow {
+  position: relative;
+  overflow: hidden;
+}
+.btn-glow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, rgba(255,255,255,0.15) 0%, transparent 70%);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+.btn-glow:hover::after {
+  opacity: 1;
+}
+
+/* ─── AI Dots animation ───────────────────────── */
+.ai-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6366f1;
+  animation: pulseDot 1.4s ease-in-out infinite;
+}
+.ai-dot:nth-child(2) { animation-delay: 0.2s; }
+.ai-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* ─── Terminal ────────────────────────────────── */
+.terminal-output {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.terminal-error { color: #ef4444; }
+.terminal-warn  { color: #f59e0b; }
+.terminal-sys   { color: #6366f1; }
+
+/* ─── Diff viewer ─────────────────────────────── */
+.diff-add { background: rgba(34, 197, 94, 0.12); color: #4ade80; }
+.diff-del { background: rgba(239, 68, 68, 0.12); color: #f87171; }
+.diff-unchanged { color: #71717a; }
+
+/* ─── Tooltip ─────────────────────────────────── */
+[data-tooltip] {
+  position: relative;
+}
+[data-tooltip]::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: #27272a;
+  color: #e4e4e7;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s;
+  z-index: 100;
+  border: 1px solid #3f3f46;
+}
+[data-tooltip]:hover::after {
+  opacity: 1;
+}
+
+/* ─── Landing Page gradient text ──────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, #818cf8, #6366f1, #a78bfa);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ─── Context menu ────────────────────────────── */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: #1a1a1a;
+  border: 1px solid #3f3f46;
+  border-radius: 10px;
+  padding: 4px;
+  min-width: 160px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+  animation: fadeIn 0.1s ease-out;
+}
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+  color: #e4e4e7;
+}
+.context-menu-item:hover { background: #2a2a2a; }
+.context-menu-item.danger { color: #ef4444; }
+.context-menu-item.danger:hover { background: rgba(239,68,68,0.1); }
+
+/* ─── Keyframes ───────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slideUp {
+  from { transform: translateY(10px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@keyframes slideDown {
+  from { transform: translateY(-8px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+@keyframes pulseDot {
+  0%, 80%, 100% { transform: scale(0.3); opacity: 0.4; }
+  40%           { transform: scale(1);   opacity: 1;   }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+
+/* ─── Skeleton shimmer ────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg, #1a1a1a 25%, #2a2a2a 50%, #1a1a1a 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 8px;
+}
+
+/* ─── Animation utility classes ───────────────── */
+.animate-fade-in  { animation: fadeIn   0.3s ease-out both; }
+.animate-slide-up { animation: slideUp  0.3s ease-out both; }
+.animate-slide-down { animation: slideDown 0.25s ease-out both; }
+
