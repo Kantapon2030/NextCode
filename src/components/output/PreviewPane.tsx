@@ -138,9 +138,10 @@ export function PreviewPane({ html, onConsoleEntry, onAskAI }: Props) {
   );
 }
 
+
 // ─────────────────────────────────────────────────────────────────────────────
 // buildPreview — แปลง VFS เป็น HTML ที่แสดงผลได้ใน srcdoc iframe
-// inline ทุกไฟล์ JS/CSS/รูปภาพ ไม่พึ่ง external request
+// แก้ปัญหา ES modules (Cannot use import statement outside a module) และรูปภาพ
 // ─────────────────────────────────────────────────────────────────────────────
 
 type VFS = {
@@ -148,58 +149,151 @@ type VFS = {
   assets: Record<string, { buffer: ArrayBuffer; mimeType: string }>;
 };
 
-/** หาไฟล์ใน VFS จาก path (ลอง exact → ตัด ./ → แค่ basename) */
-function lookupFile(vfs: VFS, path: string): string | null {
-  if (!path || path.startsWith('http') || path.startsWith('//')) return null;
-  const clean = path.replace(/^\.\//, '').replace(/^\//, '');
+// เก็บสะสม Blob URLs ที่ถูกสร้างขึ้น เพื่อจะทำการ revoke เมื่อทำการ rebuild ครั้งถัดไป
+let activeBlobUrls: string[] = [];
 
-  if (vfs.files[clean])   return vfs.files[clean].content;
-  if (vfs.files[path])    return vfs.files[path].content;
-
-  // basename fallback: "js/utils.js" → "utils.js"
-  const base = clean.split('/').pop() ?? '';
-  if (base && vfs.files[base]) return vfs.files[base].content;
-
-  return null;
+function clearActiveBlobUrls() {
+  activeBlobUrls.forEach((url) => {
+    try {
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.warn('Failed to revoke blob URL:', e);
+    }
+  });
+  activeBlobUrls = [];
 }
 
-/** แปลง ArrayBuffer → base64 data URL */
-function bufferToDataURL(buffer: ArrayBuffer, mimeType: string): string {
-  const bytes = new Uint8Array(buffer);
-  let bin = '';
-  // Process in chunks to avoid call stack overflow
-  const CHUNK = 8192;
-  for (let i = 0; i < bytes.length; i += CHUNK) {
-    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+/** ฟังก์ชันแปลง relative path ให้เป็น path สัมบูรณ์ภายใน VFS */
+function resolvePath(basePath: string, relativePath: string): string {
+  if (!relativePath || relativePath.startsWith('http') || relativePath.startsWith('//') || relativePath.startsWith('data:') || relativePath.startsWith('blob:')) {
+    return relativePath;
   }
-  return `data:${mimeType};base64,${btoa(bin)}`;
-}
+  
+  const cleanBase = basePath.replace(/\\/g, '/');
+  const cleanRel = relativePath.replace(/\\/g, '/').replace(/^\.\//, '');
 
-/** หา asset (รูปภาพ) ใน VFS แล้วคืน data URL */
-function lookupAssetDataURL(vfs: VFS, path: string): string | null {
-  if (!path || path.startsWith('data:') || path.startsWith('http') || path.startsWith('//')) {
-    return null;
+  const baseParts = cleanBase.split('/');
+  baseParts.pop(); // เอาชื่อไฟล์ออก เหลือแต่ชื่อโฟลเดอร์
+  
+  const relParts = cleanRel.split('/');
+  for (const part of relParts) {
+    if (part === '.' || part === '') continue;
+    if (part === '..') {
+      baseParts.pop();
+    } else {
+      baseParts.push(part);
+    }
   }
-  const clean = path.replace(/^\.\//, '').replace(/^\//, '');
-
-  // ลอง asset ก่อน (รูปที่อัพโหลด)
-  const asset = vfs.assets[clean] ?? vfs.assets[path] ?? vfs.assets[clean.split('/').pop() ?? ''];
-  if (asset) return bufferToDataURL(asset.buffer, asset.mimeType);
-
-  // SVG / รูปที่เป็น text file ใน vfs.files
-  const svgContent = lookupFile(vfs, path);
-  if (svgContent && (path.endsWith('.svg') || svgContent.trim().startsWith('<svg'))) {
-    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
-  }
-
-  return null;
+  return baseParts.join('/');
 }
 
 export function buildPreview(vfs: VFS): string {
+  // 1. ล้าง Blob URL เดิมออกให้หมดเพื่อป้องกัน memory leak
+  clearActiveBlobUrls();
+
+  const resolvedUrls: Record<string, string> = {};
+
+  // ฟังก์ชันย่อยสำหรับดึง/สร้าง Blob URL ของไฟล์ใน VFS แบบ recursive และแก้ references ภายใน
+  function getBlobUrl(path: string): string {
+    const cleanPath = path.replace(/^\.\//, '').replace(/^\//, '').replace(/\\/g, '/');
+
+    if (resolvedUrls[cleanPath]) {
+      return resolvedUrls[cleanPath];
+    }
+
+    // 1. หาใน Assets (เช่น ไฟล์รูปภาพที่ผู้ใช้ drop เข้ามา)
+    const asset = vfs.assets[cleanPath] ?? vfs.assets[path];
+    if (asset) {
+      const blob = new Blob([asset.buffer], { type: asset.mimeType });
+      const url = URL.createObjectURL(blob);
+      resolvedUrls[cleanPath] = url;
+      activeBlobUrls.push(url);
+      return url;
+    }
+
+    // 2. หาใน Files (เช่น script, style, svg)
+    const file = vfs.files[cleanPath] ?? vfs.files[path];
+    if (file) {
+      // ตั้งเป็น TEMPORARY_HINT เพื่อหลีกเลี่ยง infinite loop กรณีเกิด circular imports
+      resolvedUrls[cleanPath] = 'TEMPORARY_HINT';
+
+      let content = file.content;
+      const lowerPath = cleanPath.toLowerCase();
+      const isJs = lowerPath.endsWith('.js') || lowerPath.endsWith('.jsx') || lowerPath.endsWith('.ts') || lowerPath.endsWith('.tsx');
+      const isCss = lowerPath.endsWith('.css');
+
+      if (isJs) {
+        // แก้ไข static import/export statements: `import { X } from './Y.js'`
+        content = content.replace(/(import|export)\s+([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g, (match, type, exports, importPath) => {
+          const target = resolvePath(cleanPath, importPath);
+          const targetUrl = getBlobUrl(target);
+          if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
+            return `${type} ${exports} from '${targetUrl}'`;
+          }
+          return match;
+        });
+
+        // แก้ไข side-effect imports: `import './style.css'`
+        content = content.replace(/import\s+['"]([^'"]+)['"]/g, (match, importPath) => {
+          const target = resolvePath(cleanPath, importPath);
+          const targetUrl = getBlobUrl(target);
+          if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
+            return `import '${targetUrl}'`;
+          }
+          return match;
+        });
+
+        // แก้ไข dynamic imports: `import('./lazy.js')`
+        content = content.replace(/import\s*\(\s*['"]([^'"]+)['"]\s*\)/g, (match, importPath) => {
+          const target = resolvePath(cleanPath, importPath);
+          const targetUrl = getBlobUrl(target);
+          if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
+            return `import('${targetUrl}')`;
+          }
+          return match;
+        });
+      } else if (isCss) {
+        // แก้ไข CSS @import: `@import "./theme.css";`
+        content = content.replace(/@import\s+(url\(['"]?)?([^'")\s;)]+)(['"]?\))?\s*;/g, (match, urlPrefix, importPath) => {
+          if (importPath.startsWith('http') || importPath.startsWith('//') || importPath.startsWith('data:') || importPath.startsWith('blob:')) {
+            return match;
+          }
+          const target = resolvePath(cleanPath, importPath);
+          const targetUrl = getBlobUrl(target);
+          if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
+            return urlPrefix ? `@import url("${targetUrl}");` : `@import "${targetUrl}";`;
+          }
+          return match;
+        });
+
+        // แก้ไข background images หรือ fonts ใน CSS: `url(...)`
+        content = content.replace(/url\(['"]?([^'")\s]+)['"]?\)/g, (match, urlPath) => {
+          if (urlPath.startsWith('http') || urlPath.startsWith('//') || urlPath.startsWith('data:') || urlPath.startsWith('blob:')) {
+            return match;
+          }
+          const target = resolvePath(cleanPath, urlPath);
+          const targetUrl = getBlobUrl(target);
+          if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
+            return `url("${targetUrl}")`;
+          }
+          return match;
+        });
+      }
+
+      const blob = new Blob([content], { type: file.mimeType });
+      const url = URL.createObjectURL(blob);
+      resolvedUrls[cleanPath] = url;
+      activeBlobUrls.push(url);
+      return url;
+    }
+
+    return '';
+  }
+
+  // 2. ดึง index.html ออกมา parsing
   const rawHtml = vfs.files['index.html']?.content
     ?? '<html><body><p style="font-family:sans-serif;padding:2rem;color:#888">ไม่พบ index.html</p></body></html>';
 
-  // ── Parse ด้วย DOMParser เพื่อความแม่นยำ ──────────────────
   let doc: Document;
   try {
     doc = new DOMParser().parseFromString(rawHtml, 'text/html');
@@ -207,69 +301,125 @@ export function buildPreview(vfs: VFS): string {
     return rawHtml;
   }
 
-  // ── 1. Inline CSS (<link rel="stylesheet" href="...">) ──────
+  // 3. แก้ CSS <link rel="stylesheet"> → ชี้ไปที่ Blob URL
   doc.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"][href]').forEach((link) => {
     const href = link.getAttribute('href') ?? '';
-    const content = lookupFile(vfs, href);
-    if (content !== null) {
-      const style = doc.createElement('style');
-      style.setAttribute('data-src', href);
-      style.textContent = content;
-      link.parentNode?.replaceChild(style, link);
+    if (href.startsWith('http') || href.startsWith('//')) return;
+    const blobUrl = getBlobUrl(href);
+    if (blobUrl && blobUrl !== 'TEMPORARY_HINT') {
+      link.setAttribute('href', blobUrl);
     }
   });
 
-  // ── 2. Inline JS (<script src="...">) ──────────────────────
-  // NOTE: ลบ type="module" เพราะ import ใน srcdoc ทำงานไม่ได้
-  doc.querySelectorAll<HTMLScriptElement>('script[src]').forEach((script) => {
-    const src = script.getAttribute('src') ?? '';
-    if (src.startsWith('http') || src.startsWith('//')) return; // CDN → ปล่อยไว้
+  // 4. แก้ inline <style> tags (rewrite background url หรือ @import ภายใน)
+  doc.querySelectorAll<HTMLStyleElement>('style').forEach((styleTag) => {
+    let content = styleTag.textContent ?? '';
+    
+    content = content.replace(/@import\s+(url\(['"]?)?([^'")\s;)]+)(['"]?\))?\s*;/g, (match, urlPrefix, importPath) => {
+      if (importPath.startsWith('http') || importPath.startsWith('//') || importPath.startsWith('data:') || importPath.startsWith('blob:')) {
+        return match;
+      }
+      const target = resolvePath('index.html', importPath);
+      const targetUrl = getBlobUrl(target);
+      if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
+        return urlPrefix ? `@import url("${targetUrl}");` : `@import "${targetUrl}";`;
+      }
+      return match;
+    });
 
-    const content = lookupFile(vfs, src);
-    if (content !== null) {
-      const newScript = doc.createElement('script');
-      newScript.setAttribute('data-src', src);
-      // ไม่คัดลอก type="module" — ใช้ classic script แทน
-      // copy defer/async ถ้ามี
-      if (script.hasAttribute('defer'))  newScript.setAttribute('defer', '');
-      if (script.hasAttribute('async'))  newScript.setAttribute('async', '');
-      newScript.textContent = content;
-      script.parentNode?.replaceChild(newScript, script);
+    content = content.replace(/url\(['"]?([^'")\s]+)['"]?\)/g, (match, urlPath) => {
+      if (urlPath.startsWith('http') || urlPath.startsWith('//') || urlPath.startsWith('data:') || urlPath.startsWith('blob:')) {
+        return match;
+      }
+      const target = resolvePath('index.html', urlPath);
+      const targetUrl = getBlobUrl(target);
+      if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
+        return `url("${targetUrl}")`;
+      }
+      return match;
+    });
+    
+    styleTag.textContent = content;
+  });
+
+  // 5. แก้ <script src="..."> หรือ inline module scripts
+  doc.querySelectorAll<HTMLScriptElement>('script').forEach((script) => {
+    const src = script.getAttribute('src');
+    if (src) {
+      if (src.startsWith('http') || src.startsWith('//')) return;
+      const blobUrl = getBlobUrl(src);
+      if (blobUrl && blobUrl !== 'TEMPORARY_HINT') {
+        script.setAttribute('src', blobUrl);
+      }
+    } else {
+      // Inline Script: แก้ไข import statements ข้างใน ให้ชี้หา Blob URLs
+      let content = script.textContent ?? '';
+      
+      content = content.replace(/(import|export)\s+([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g, (match, type, exports, importPath) => {
+        const target = resolvePath('index.html', importPath);
+        const targetUrl = getBlobUrl(target);
+        if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
+          return `${type} ${exports} from '${targetUrl}'`;
+        }
+        return match;
+      });
+
+      content = content.replace(/import\s+['"]([^'"]+)['"]/g, (match, importPath) => {
+        const target = resolvePath('index.html', importPath);
+        const targetUrl = getBlobUrl(target);
+        if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
+          return `import '${targetUrl}'`;
+        }
+        return match;
+      });
+
+      content = content.replace(/import\s*\(\s*['"]([^'"]+)['"]\s*\)/g, (match, importPath) => {
+        const target = resolvePath('index.html', importPath);
+        const targetUrl = getBlobUrl(target);
+        if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
+          return `import('${targetUrl}')`;
+        }
+        return match;
+      });
+
+      script.textContent = content;
     }
   });
 
-  // ── 3. แปลงรูปภาพ → data URL ────────────────────────────────
-  // <img src="picture/photo.jpg">
+  // 6. แก้ไข tag <img> และ background-image ใน inline style
   doc.querySelectorAll<HTMLImageElement>('img[src]').forEach((img) => {
     const src = img.getAttribute('src') ?? '';
-    const dataUrl = lookupAssetDataURL(vfs, src);
-    if (dataUrl) img.setAttribute('src', dataUrl);
+    if (src.startsWith('http') || src.startsWith('//') || src.startsWith('data:') || src.startsWith('blob:')) return;
+    const blobUrl = getBlobUrl(src);
+    if (blobUrl && blobUrl !== 'TEMPORARY_HINT') {
+      img.setAttribute('src', blobUrl);
+    }
   });
 
-  // background-image ใน inline style
   doc.querySelectorAll<HTMLElement>('[style*="url("]').forEach((el) => {
     const style = el.getAttribute('style') ?? '';
     const replaced = style.replace(/url\(['"]?([^'")\s]+)['"]?\)/g, (_match, src) => {
-      const dataUrl = lookupAssetDataURL(vfs, src);
-      return dataUrl ? `url("${dataUrl}")` : _match;
+      if (src.startsWith('http') || src.startsWith('//') || src.startsWith('data:') || src.startsWith('blob:')) {
+        return _match;
+      }
+      const blobUrl = getBlobUrl(src);
+      return blobUrl && blobUrl !== 'TEMPORARY_HINT' ? `url("${blobUrl}")` : _match;
     });
     if (replaced !== style) el.setAttribute('style', replaced);
   });
 
-  // ── 4. แก้ href ลิงก์ภายในโปรเจกต์ (more.html → inline เปิดไม่ได้ แต่ไม่ crash) ──
+  // 7. แก้ href ลิงก์ภายในโปรเจกต์
   doc.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
     const href = a.getAttribute('href') ?? '';
-    // ถ้าเป็นไฟล์ .html ใน VFS และไม่ใช่ URL ภายนอก
     if (!href.startsWith('http') && !href.startsWith('//') && !href.startsWith('#')) {
-      const target = lookupFile(vfs, href);
-      if (target !== null) {
-        // แสดง tooltip แต่ไม่เปิดได้ใน preview
+      const target = vfs.files[resolvePath('index.html', href)];
+      if (target) {
         a.setAttribute('title', `หน้า ${href} (เปิดได้เฉพาะ localhost)`);
       }
     }
   });
 
-  // ── 5. Inject error capture + console bridge ────────────────
+  // 8. แทรกตัวดักจับ error + console bridge
   const errorScript = doc.createElement('script');
   errorScript.textContent = `
 (function(){
@@ -298,14 +448,13 @@ export function buildPreview(vfs: VFS): string {
   };
 })();`;
 
-  // แทรกต้น <head>
   if (doc.head) {
     doc.head.insertBefore(errorScript, doc.head.firstChild);
   } else {
     doc.documentElement.prepend(errorScript);
   }
 
-  // ── 6. CSP ──────────────────────────────────────────────────
+  // 9. CSP Meta tag เพื่อความปลอดภัยแต่ยังใช้งาน blob: และ data: ได้
   const cspMeta = doc.createElement('meta');
   cspMeta.setAttribute('http-equiv', 'Content-Security-Policy');
   cspMeta.setAttribute(
@@ -316,3 +465,4 @@ export function buildPreview(vfs: VFS): string {
 
   return '<!DOCTYPE html>' + doc.documentElement.outerHTML;
 }
+
