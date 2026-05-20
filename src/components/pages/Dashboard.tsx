@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../store/appStore';
 import { db, deleteProjectData } from '../../storage/db';
-import { saveVFSFile } from '../../storage/vfsHelpers';
+import { saveVFSFile, saveVFSAsset } from '../../storage/vfsHelpers';
 import { getTemplate, TEMPLATES } from '../../templates';
 import { toast } from '../shared/Toast';
 import { LoadingSpinner, SkeletonCard } from '../shared/LoadingSpinner';
@@ -10,8 +10,11 @@ import WelcomeModal from '../modals/WelcomeModal';
 import NewProjectModal from '../modals/NewProjectModal';
 import SettingsModal from '../modals/SettingsModal';
 import {
+  readDroppedItems, detectLanguage, isImage, isTextFile, getMimeType,
+} from '../../utils/folderImport';
+import {
   Code2, Plus, Search, LogOut, Settings, Clock, Cloud, CloudOff, Loader2,
-  Copy, Download, Trash2, FolderOpen, User, ChevronDown, X,
+  Copy, Download, Trash2, FolderOpen, User, ChevronDown, X, Upload, FolderInput,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -46,7 +49,11 @@ export default function Dashboard() {
   const [avatarMenu, setAvatarMenu] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState('');
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState('');
   const avatarRef = useRef<HTMLDivElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     async function load() {
@@ -129,6 +136,124 @@ export default function Dashboard() {
     const { updateProject } = useAppStore.getState();
     updateProject(id, { name: renameVal.trim() });
     setRenamingId(null);
+  }
+
+  // ── Folder / File import ──────────────────────────────────────
+  const handleImportFiles = useCallback(async (dataTransfer: DataTransfer) => {
+    setImporting(true);
+    setIsDragOver(false);
+    try {
+      setImportProgress('กำลังอ่านไฟล์...');
+      const imported = await readDroppedItems(dataTransfer);
+      if (imported.length === 0) {
+        toast('error', 'ไม่พบไฟล์ที่รองรับ');
+        return;
+      }
+
+      // ตั้งชื่อโปรเจกต์จากชื่อโฟลเดอร์แรก หรือ "โปรเจกต์ที่นำเข้า"
+      const firstEntry = dataTransfer.items?.[0];
+      const firstEntryName =
+        (firstEntry as DataTransferItem & { webkitGetAsEntry?: () => FileSystemEntry | null })
+          ?.webkitGetAsEntry?.()?.name ||
+        imported[0]?.file.name.replace(/\.[^.]+$/, '') ||
+        'โปรเจกต์ที่นำเข้า';
+
+      const lang = detectLanguage(imported);
+      const projectId = Math.random().toString(36).slice(2);
+      const now = Date.now();
+
+      await db.projects.add({
+        id: projectId,
+        name: firstEntryName,
+        language: lang,
+        template: 'import',
+        created_at: now,
+        updated_at: now,
+      });
+
+      let count = 0;
+      for (const { path, file } of imported) {
+        setImportProgress(`กำลังนำเข้า ${count + 1}/${imported.length}: ${path}`);
+        const buf = await file.arrayBuffer();
+
+        if (isImage(file.name)) {
+          // บันทึกเป็น asset (รูปภาพ)
+          await db.assets.put({
+            project_id: projectId,
+            name: path,                    // เก็บ path เต็ม เช่น "picture/photo.jpg"
+            buffer: buf,
+            mime_type: file.type || getMimeType(file.name),
+            size: buf.byteLength,
+            is_dirty: false,
+          });
+        } else if (isTextFile(file.name)) {
+          const text = new TextDecoder('utf-8', { fatal: false }).decode(buf);
+          await saveVFSFile(projectId, path, text, getMimeType(file.name));
+        }
+        count++;
+      }
+
+      addProject({
+        id: projectId,
+        name: firstEntryName,
+        language: lang,
+        template: 'import',
+        created_at: now,
+        updated_at: now,
+      });
+
+      toast('success', `นำเข้า ${count} ไฟล์แล้ว → เปิดโปรเจกต์!`);
+      navigate(`/project/${projectId}`);
+    } catch (err) {
+      console.error(err);
+      toast('error', 'นำเข้าไฟล์ไม่สำเร็จ');
+    } finally {
+      setImporting(false);
+      setImportProgress('');
+    }
+  }, [addProject, navigate]);
+
+  async function handleFolderInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
+    // Simulate DataTransfer-like structure using FileList
+    const dt = new DataTransfer();
+    files.forEach((f) => dt.items.add(f));
+    // For webkitRelativePath: rebuild paths
+    const imported = files.map((f) => ({
+      path: (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name,
+      file: f,
+    }));
+    setImporting(true);
+    try {
+      const lang = detectLanguage(imported);
+      const folderName = imported[0]?.path.split('/')[0] || 'โปรเจกต์ที่นำเข้า';
+      const projectId = Math.random().toString(36).slice(2);
+      const now = Date.now();
+      await db.projects.add({
+        id: projectId, name: folderName, language: lang,
+        template: 'import', created_at: now, updated_at: now,
+      });
+      let count = 0;
+      for (const { path, file } of imported) {
+        setImportProgress(`${count + 1}/${imported.length}: ${path}`);
+        const buf = await file.arrayBuffer();
+        if (isImage(file.name)) {
+          await db.assets.put({
+            project_id: projectId, name: path, buffer: buf,
+            mime_type: file.type || getMimeType(file.name),
+            size: buf.byteLength, is_dirty: false,
+          });
+        } else if (isTextFile(file.name)) {
+          await saveVFSFile(projectId, path, new TextDecoder().decode(buf), getMimeType(file.name));
+        }
+        count++;
+      }
+      addProject({ id: projectId, name: folderName, language: lang, template: 'import', created_at: now, updated_at: now });
+      toast('success', `นำเข้า ${count} ไฟล์แล้ว`);
+      navigate(`/project/${projectId}`);
+    } catch { toast('error', 'นำเข้าไม่สำเร็จ'); }
+    finally { setImporting(false); setImportProgress(''); e.target.value = ''; }
   }
 
   function handleLogout() {
@@ -225,13 +350,74 @@ export default function Dashboard() {
       </nav>
 
       <main className="flex-1 px-6 py-8 max-w-7xl mx-auto w-full">
-        <div className="flex items-baseline justify-between mb-6">
+        <div className="flex items-baseline justify-between mb-4">
           <div>
             <h1 className="text-2xl font-bold text-white">โปรเจกต์ของฉัน</h1>
             <p className="text-sm text-zinc-500 mt-1">
               {projects.length > 0 ? `${projects.length} โปรเจกต์` : 'ยังไม่มีโปรเจกต์'}
             </p>
           </div>
+        </div>
+
+        {/* ── Drop Zone ── */}
+        <div
+          onDragEnter={(e) => { e.preventDefault(); setIsDragOver(true); }}
+          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsDragOver(false);
+          }}
+          onDrop={async (e) => { e.preventDefault(); await handleImportFiles(e.dataTransfer); }}
+          onClick={() => folderInputRef.current?.click()}
+          className={`relative flex flex-col items-center justify-center gap-3 mb-6 p-8 rounded-2xl border-2 border-dashed cursor-pointer transition-all duration-200 ${
+            isDragOver
+              ? 'border-primary-400 bg-primary-900/20 scale-[1.01]'
+              : 'border-border hover:border-primary-600/50 hover:bg-surface-800/40'
+          }`}
+        >
+          {importing ? (
+            <>
+              <Loader2 className="w-10 h-10 text-primary-400 animate-spin" />
+              <p className="text-sm text-primary-300 font-medium">กำลังนำเข้า...</p>
+              {importProgress && (
+                <p className="text-xs text-zinc-500 max-w-sm truncate text-center">{importProgress}</p>
+              )}
+            </>
+          ) : (
+            <>
+              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-colors ${
+                isDragOver ? 'bg-primary-600' : 'bg-surface-700'
+              }`}>
+                <FolderInput className={`w-7 h-7 ${isDragOver ? 'text-white' : 'text-primary-400'}`} />
+              </div>
+              <div className="text-center">
+                <p className="text-sm font-semibold text-white">
+                  {isDragOver ? '🎯 วางไฟล์ที่นี่เลย!' : 'ลากไฟล์หรือโฟลเดอร์มาวางที่นี่'}
+                </p>
+                <p className="text-xs text-zinc-500 mt-1">
+                  รองรับทุกไฟล์: HTML, CSS, JS, Python, C/C++, รูปภาพ · โยนทั้งโฟลเดอร์ได้เลย
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-zinc-600">
+                <span className="px-2 py-1 bg-surface-700 rounded-lg">HTML</span>
+                <span className="px-2 py-1 bg-surface-700 rounded-lg">CSS</span>
+                <span className="px-2 py-1 bg-surface-700 rounded-lg">JS</span>
+                <span className="px-2 py-1 bg-surface-700 rounded-lg">Python</span>
+                <span className="px-2 py-1 bg-surface-700 rounded-lg">C/C++</span>
+                <span className="px-2 py-1 bg-surface-700 rounded-lg">รูปภาพ</span>
+              </div>
+            </>
+          )}
+          {/* hidden folder input */}
+          <input
+            ref={folderInputRef}
+            type="file"
+            multiple
+            // @ts-ignore
+            webkitdirectory=""
+            directory=""
+            className="hidden"
+            onChange={handleFolderInputChange}
+          />
         </div>
 
         {loading ? (

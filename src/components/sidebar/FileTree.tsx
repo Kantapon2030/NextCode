@@ -4,10 +4,14 @@ import { db } from '../../storage/db';
 import { isImageFile, getMimeType } from '../../storage/vfsHelpers';
 import {
   File, Image, FilePlus, Upload, Trash2, Download,
-  Edit3, Keyboard
+  Edit3, Keyboard, FolderOpen,
 } from 'lucide-react';
 import { toast } from '../shared/Toast';
 import { SnippetCheatSheet } from '../editor/SnippetCheatSheet';
+import {
+  readDroppedItems, isImage, isTextFile,
+  getMimeType as getImportMime,
+} from '../../utils/folderImport';
 
 interface Props {
   projectId: string;
@@ -94,35 +98,64 @@ export function FileTree({
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
+    let count = 0;
     for (const file of files) {
-      if (file.size > 5 * 1024 * 1024) {
-        toast('error', `${file.name} เกินขนาดสูงสุด (5MB)`);
+      if (file.size > 10 * 1024 * 1024) {
+        toast('error', `${file.name} เกินขนาดสูงสุด (10MB)`);
         continue;
       }
       const buf = await file.arrayBuffer();
-      if (isImageFile(file.name)) {
-        onAssetAdd(file.name, buf, file.type);
-        toast('success', `อัปโหลด ${file.name} แล้ว`);
-      } else {
-        const text = new TextDecoder().decode(buf);
+      if (isImage(file.name)) {
+        onAssetAdd(file.name, buf, file.type || getMimeType(file.name));
+      } else if (isTextFile(file.name)) {
+        const text = new TextDecoder('utf-8', { fatal: false }).decode(buf);
         onFileAdd(file.name, text);
-        toast('success', `เพิ่มไฟล์ ${file.name} แล้ว`);
       }
+      count++;
     }
+    if (count > 0) toast('success', `เพิ่ม ${count} ไฟล์แล้ว`);
     e.target.value = '';
   }
 
-  // Drag and drop
-  function handleDrop(e: React.DragEvent) {
+  // Drag & drop — รองรับโฟลเดอร์แบบ recursive
+  async function handleDrop(e: React.DragEvent) {
     e.preventDefault();
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    const fakeEvent = { target: { files: droppedFiles } } as unknown as React.ChangeEvent<HTMLInputElement>;
-    handleFileUpload(fakeEvent);
+    e.stopPropagation();
+    setDragOver(false);
+
+    let count = 0;
+    try {
+      const imported = await readDroppedItems(e.dataTransfer);
+
+      for (const { path, file } of imported) {
+        if (file.size > 10 * 1024 * 1024) {
+          toast('error', `${path} เกินขนาดสูงสุด (10MB)`);
+          continue;
+        }
+        const buf = await file.arrayBuffer();
+        if (isImage(file.name)) {
+          // เก็บ path เต็ม เช่น "picture/photo.jpg" เพื่อให้ buildPreview map ถูก
+          onAssetAdd(path, buf, file.type || getImportMime(file.name));
+        } else if (isTextFile(file.name)) {
+          const text = new TextDecoder('utf-8', { fatal: false }).decode(buf);
+          onFileAdd(path, text);
+        }
+        count++;
+      }
+    } catch (err) {
+      console.error('[FileTree] drop error:', err);
+      toast('error', 'นำเข้าไฟล์ไม่สำเร็จ');
+    }
+
+    if (count > 0) toast('success', `เพิ่ม ${count} ไฟล์แล้ว`);
   }
 
-  const bg = theme === 'dark' ? 'bg-surface-900 border-border' : 'bg-zinc-50 border-zinc-200';
+  const bg       = theme === 'dark' ? 'bg-surface-900 border-border' : 'bg-zinc-50 border-zinc-200';
   const itemHover = theme === 'dark' ? 'hover:bg-surface-800' : 'hover:bg-zinc-100';
-  const itemActive = theme === 'dark' ? 'bg-primary-900/30 text-primary-300 border-l-2 border-primary-500' : 'bg-primary-50 text-primary-700 border-l-2 border-primary-500';
+  const itemActive = theme === 'dark'
+    ? 'bg-primary-900/30 text-primary-300 border-l-2 border-primary-500'
+    : 'bg-primary-50 text-primary-700 border-l-2 border-primary-500';
+  const [dragOver, setDragOver] = useState(false);
 
   if (showCheatSheet) {
     return (
@@ -132,10 +165,24 @@ export function FileTree({
 
   return (
     <div
-      className={`flex flex-col h-full border-r ${bg} text-sm overflow-hidden`}
+      className={`relative flex flex-col h-full border-r ${bg} text-sm overflow-hidden transition-colors ${
+        dragOver ? 'bg-primary-900/10 border-primary-500/50' : ''
+      }`}
       onDrop={handleDrop}
-      onDragOver={(e) => e.preventDefault()}
+      onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragEnter={(e) => { e.preventDefault(); setDragOver(true); }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragOver(false);
+      }}
     >
+      {/* Drop overlay */}
+      {dragOver && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-primary-900/40 border-2 border-dashed border-primary-400 rounded-lg m-1 pointer-events-none">
+          <FolderOpen className="w-10 h-10 text-primary-300" />
+          <p className="text-sm font-semibold text-primary-200">วางไฟล์/โฟลเดอร์ที่นี่</p>
+          <p className="text-xs text-primary-400">รองรับทุกประเภทรวมถึงรูปภาพ</p>
+        </div>
+      )}
       {/* Files section */}
       <div className="flex-1 overflow-y-auto">
         <div className="px-3 pt-3 pb-1 text-xs font-medium text-zinc-600 uppercase tracking-wider">
