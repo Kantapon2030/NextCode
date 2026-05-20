@@ -226,11 +226,18 @@ export default function LandingPage() {
           </div>
         </main>
 
+
         {/* Footer */}
-        <footer className="text-center py-6 text-zinc-700 text-sm border-t border-border/30">
-          <div className="flex items-center justify-center gap-2">
-            <Terminal className="w-4 h-4" />
-            <span>by Nextcode Team · รันบน Vercel</span>
+        <footer className="text-center py-8 text-zinc-500 text-xs border-t border-border/10">
+          <div className="flex flex-col items-center justify-center gap-2">
+            <div className="flex items-center gap-2">
+              <Terminal className="w-3.5 h-3.5" />
+              <span>Designed & Developed by <strong className="text-zinc-300 font-medium">Kantapon</strong></span>
+            </div>
+            <div className="flex items-center gap-1.5 opacity-70">
+              <Brain className="w-3 h-3 text-purple-400" />
+              <span>Powered by <strong className="text-purple-300 font-medium">Gemini 2.0 Flash</strong></span>
+            </div>
           </div>
         </footer>
       </div>

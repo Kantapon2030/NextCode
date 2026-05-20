@@ -228,6 +228,14 @@ export default function SettingsModal({ onClose }: Props) {
               </>
             )}
           </section>
+
+          {/* Credits */}
+          <div className="mt-6 pt-4 border-t border-border/40 flex flex-col items-center gap-1 opacity-60 text-center shrink-0">
+            <p className="text-xs text-zinc-400 font-semibold">Nextcode IDE</p>
+            <p className="text-[10px] text-zinc-500">
+              Designed by <span className="text-zinc-400 font-semibold">Kantapon</span> · Powered by Gemini 2.0 Flash
+            </p>
+          </div>
         </div>
       </div>
     </div>
