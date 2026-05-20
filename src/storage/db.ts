@@ -52,6 +52,16 @@ export interface TerminalHistoryEntry {
   content: string;
 }
 
+export interface CustomSnippet {
+  id?: number;
+  trigger: string;
+  label: string;
+  description: string;
+  body: string;
+  language: string[];
+  createdAt: number;
+}
+
 export class NextcodeDB extends Dexie {
   projects!: Table<Project>;
   files!: Table<ProjectFile>;
@@ -59,6 +69,7 @@ export class NextcodeDB extends Dexie {
   snapshots!: Table<Snapshot>;
   settings!: Table<Setting>;
   terminal_history!: Table<TerminalHistoryEntry>;
+  custom_snippets!: Table<CustomSnippet>;
 
   constructor() {
     super('NextcodeIDE_v1');
@@ -69,6 +80,16 @@ export class NextcodeDB extends Dexie {
       snapshots: '++id, project_id, timestamp, type',
       settings: '&key',
       terminal_history: '++id, project_id, timestamp, type',
+    });
+    // v2: add custom_snippets table
+    this.version(2).stores({
+      projects: '&id, name, language, template, created_at, updated_at, drive_folder_id',
+      files: '&[project_id+filename], project_id, filename, is_dirty, updated_at',
+      assets: '&[project_id+name], project_id, name, is_dirty',
+      snapshots: '++id, project_id, timestamp, type',
+      settings: '&key',
+      terminal_history: '++id, project_id, timestamp, type',
+      custom_snippets: '++id, trigger, language, createdAt',
     });
   }
 }

@@ -1,7 +1,12 @@
-import React, { Suspense, lazy, useRef, useEffect } from 'react';
+import React, { Suspense, lazy, useRef, useEffect, useCallback } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { getMonacoLanguage } from '../../storage/vfsHelpers';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
+import {
+  registerCompletionProvider,
+  registerTabExpansion,
+  insertSnippetAtCursor,
+} from '../../utils/snippetShortcuts';
 
 const MonacoEditor = lazy(() =>
   import('@monaco-editor/react').then((m) => ({ default: m.default }))
@@ -31,40 +36,67 @@ export function MonacoWrapper({
   markers = [],
 }: Props) {
   const { theme, fontSize, userMode } = useAppStore();
-  const editorRef = useRef<unknown>(null);
-  const monacoRef = useRef<unknown>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const editorRef  = useRef<any>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const monacoRef  = useRef<any>(null);
 
-  const language = getMonacoLanguage(filename);
+  const language    = getMonacoLanguage(filename);
   const editorTheme = theme === 'dark' ? 'vs-dark' : 'vs';
 
-  function handleEditorDidMount(editor: unknown, monaco: unknown) {
-    editorRef.current = editor;
-    monacoRef.current = monaco;
+  // ── Listen for snippet insert events from SnippetCheatSheet ──
+  useEffect(() => {
+    function handler(e: Event) {
+      if (!isActive) return;
+      const body = (e as CustomEvent<{ body: string }>).detail?.body;
+      if (body && editorRef.current) {
+        editorRef.current.focus();
+        insertSnippetAtCursor(editorRef.current, body);
+      }
+    }
+    window.addEventListener('nextcode:insertSnippet', handler);
+    return () => window.removeEventListener('nextcode:insertSnippet', handler);
+  }, [isActive]);
 
-    const ed = editor as {
-      addCommand: (key: number, fn: () => void) => void;
-      onDidChangeCursorPosition: (fn: (e: { position: { lineNumber: number; column: number } }) => void) => void;
-    };
-    const mo = monaco as {
-      KeyMod: { CtrlCmd: number };
-      KeyCode: { KeyS: number; Enter: number; KeyB: number; KEY_K: number };
-    };
+  // ── Re-apply markers when they change ──
+  useEffect(() => {
+    if (editorRef.current && monacoRef.current) {
+      applyMarkers(editorRef.current, monacoRef.current);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [markers]);
+
+  // ── onMount ──────────────────────────────────────────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function handleEditorDidMount(editor: any, monaco: any) {
+    editorRef.current  = editor;
+    monacoRef.current  = monaco;
 
     // Keyboard shortcuts
-    ed.addCommand(mo.KeyMod.CtrlCmd | mo.KeyCode.KeyS, onSave);
-    ed.addCommand(mo.KeyMod.CtrlCmd | mo.KeyCode.Enter, onRun);
-    ed.addCommand(mo.KeyMod.CtrlCmd | mo.KeyCode.KeyB, onToggleAI);
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,  onSave);
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, onRun);
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyB,  onToggleAI);
 
-    // Cursor position tracking
-    ed.onDidChangeCursorPosition((e) => {
-      onCursorChange(e.position.lineNumber, e.position.column);
-    });
+    // Cursor tracking
+    editor.onDidChangeCursorPosition(
+      (e: { position: { lineNumber: number; column: number } }) => {
+        onCursorChange(e.position.lineNumber, e.position.column);
+      }
+    );
 
-    // Apply error markers
+    // ── Snippet: Completion provider (autocomplete dropdown) ──
+    registerCompletionProvider(monaco, language);
+
+    // ── Snippet: Tab-key expansion ────────────────────────────
+    registerTabExpansion(editor, monaco, language);
+
+    // ── Error markers ─────────────────────────────────────────
     applyMarkers(editor, monaco);
   }
 
-  function applyMarkers(editor: unknown, monaco: unknown) {
+  // ── Apply Monaco error/warning markers safely ─────────────
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function applyMarkers(editor: any, monaco: any) {
     if (!monaco || !editor) return;
     try {
       const mo = monaco as {
@@ -73,12 +105,11 @@ export function MonacoWrapper({
           MarkerSeverity?: { Error?: number; Warning?: number };
         };
       };
-      const ed = editor as { getModel: () => unknown };
-      const model = ed.getModel();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const model = (editor as any).getModel?.();
       if (!model) return;
       if (!mo.editor?.setModelMarkers) return;
 
-      // MarkerSeverity numeric values: Error=8, Warning=4, Info=2, Hint=1
       const SevError   = mo.editor.MarkerSeverity?.Error   ?? 8;
       const SevWarning = mo.editor.MarkerSeverity?.Warning ?? 4;
 
@@ -99,16 +130,13 @@ export function MonacoWrapper({
     }
   }
 
-  useEffect(() => {
-    if (editorRef.current && monacoRef.current) {
-      applyMarkers(editorRef.current, monacoRef.current);
-    }
-  }, [markers]);
-
   return (
     <div
       className="h-full w-full"
-      style={{ visibility: isActive ? 'visible' : 'hidden', position: isActive ? 'relative' : 'absolute' }}
+      style={{
+        visibility: isActive ? 'visible' : 'hidden',
+        position:   isActive ? 'relative' : 'absolute',
+      }}
     >
       <Suspense
         fallback={
@@ -129,8 +157,11 @@ export function MonacoWrapper({
             minimap: { enabled: true },
             formatOnPaste: true,
             automaticLayout: true,
-            quickSuggestions: true,
+            // Snippet-aware autocomplete
+            quickSuggestions: { other: true, comments: false, strings: true },
             suggestOnTriggerCharacters: true,
+            snippetSuggestions: 'top',       // show snippets first in dropdown
+            tabCompletion: 'off',            // we handle Tab ourselves
             scrollBeyondLastLine: false,
             smoothScrolling: true,
             cursorBlinking: 'smooth',

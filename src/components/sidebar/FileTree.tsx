@@ -4,10 +4,10 @@ import { db } from '../../storage/db';
 import { isImageFile, getMimeType } from '../../storage/vfsHelpers';
 import {
   File, Image, FilePlus, Upload, Trash2, Download,
-  ChevronRight, MoreVertical, Edit3, BookOpen
+  Edit3, Keyboard
 } from 'lucide-react';
 import { toast } from '../shared/Toast';
-import { SNIPPETS } from '../../templates';
+import { SnippetCheatSheet } from '../editor/SnippetCheatSheet';
 
 interface Props {
   projectId: string;
@@ -52,13 +52,13 @@ export function FileTree({
   onFileClick, onFileAdd, onFileDelete, onFileRename,
   onAssetAdd, onAssetDelete, onInsertSnippet,
 }: Props) {
-  const { theme, userMode } = useAppStore();
+  const { theme } = useAppStore();
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [renamingFile, setRenamingFile] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState('');
   const [showNewFile, setShowNewFile] = useState(false);
   const [newFileName, setNewFileName] = useState('');
-  const [showSnippets, setShowSnippets] = useState(false);
+  const [showCheatSheet, setShowCheatSheet] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -123,6 +123,12 @@ export function FileTree({
   const bg = theme === 'dark' ? 'bg-surface-900 border-border' : 'bg-zinc-50 border-zinc-200';
   const itemHover = theme === 'dark' ? 'hover:bg-surface-800' : 'hover:bg-zinc-100';
   const itemActive = theme === 'dark' ? 'bg-primary-900/30 text-primary-300 border-l-2 border-primary-500' : 'bg-primary-50 text-primary-700 border-l-2 border-primary-500';
+
+  if (showCheatSheet) {
+    return (
+      <SnippetCheatSheet onClose={() => setShowCheatSheet(false)} />
+    );
+  }
 
   return (
     <div
@@ -228,39 +234,15 @@ export function FileTree({
           <Upload className="w-3.5 h-3.5" />
           <span className="hidden sm:inline">อัปโหลด</span>
         </button>
-        {userMode === 'beginner' && (
-          <button
-            onClick={() => setShowSnippets((x) => !x)}
-            className="flex items-center gap-1 px-2 py-1.5 hover:bg-surface-700 rounded-lg transition-colors text-zinc-400 hover:text-white text-xs ml-auto"
-            title="ตัวอย่างโค้ด"
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Snippets</span>
-          </button>
-        )}
+        <button
+          onClick={() => setShowCheatSheet(true)}
+          className="flex items-center gap-1 px-2 py-1.5 hover:bg-primary-700/30 rounded-lg transition-colors text-zinc-400 hover:text-primary-300 text-xs ml-auto"
+          title="Snippet Shortcuts (พิมพ์ ! แล้วกด Tab)"
+        >
+          <Keyboard className="w-3.5 h-3.5" />
+          <span className="hidden sm:inline">Shortcuts</span>
+        </button>
       </div>
-
-      {/* Snippet library */}
-      {showSnippets && (
-        <div className={`border-t border-border max-h-64 overflow-y-auto ${theme === 'dark' ? 'bg-surface-950' : 'bg-zinc-100'}`}>
-          <div className="p-2 space-y-2">
-            {SNIPPETS.html.map((cat) => (
-              <div key={cat.category}>
-                <p className="text-xs text-zinc-600 px-1 mb-1">{cat.category}</p>
-                {cat.items.map((item) => (
-                  <button
-                    key={item.label}
-                    onClick={() => { onInsertSnippet(item.code); setShowSnippets(false); }}
-                    className="w-full text-left px-2 py-1.5 text-xs text-zinc-400 hover:bg-surface-700 hover:text-white rounded transition-colors"
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       <input
         ref={fileInputRef}
