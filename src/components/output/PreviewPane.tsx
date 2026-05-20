@@ -47,10 +47,10 @@ export function PreviewPane({ html, onConsoleEntry, onAskAI }: Props) {
   const widths: { label: string; value: typeof previewWidth; icon: React.ReactNode }[] = [
     { label: '375px', value: '375', icon: <Smartphone className="w-4 h-4" /> },
     { label: '768px', value: '768', icon: <Monitor className="w-4 h-4" /> },
-    { label: '100%', value: '100%', icon: <Maximize2 className="w-4 h-4" /> },
+    { label: '100%',  value: '100%', icon: <Maximize2 className="w-4 h-4" /> },
   ];
 
-  const bg = theme === 'dark' ? 'bg-surface-900 border-border' : 'bg-zinc-100 border-zinc-200';
+  const bg      = theme === 'dark' ? 'bg-surface-900 border-border' : 'bg-zinc-100 border-zinc-200';
   const toolbar = theme === 'dark' ? 'bg-surface-800 border-border' : 'bg-white border-zinc-200';
 
   const previewStyle: React.CSSProperties =
@@ -98,7 +98,7 @@ export function PreviewPane({ html, onConsoleEntry, onAskAI }: Props) {
         </button>
       </div>
 
-      {/* Error banner */}
+      {/* Error banners */}
       {errors.map((err, i) => (
         <div
           key={i}
@@ -138,75 +138,181 @@ export function PreviewPane({ html, onConsoleEntry, onAskAI }: Props) {
   );
 }
 
-// Build preview HTML from VFS
-let previousBlobUrls: string[] = [];
+// ─────────────────────────────────────────────────────────────────────────────
+// buildPreview — แปลง VFS เป็น HTML ที่แสดงผลได้ใน srcdoc iframe
+// inline ทุกไฟล์ JS/CSS/รูปภาพ ไม่พึ่ง external request
+// ─────────────────────────────────────────────────────────────────────────────
 
-export function buildPreview(
-  vfs: {
-    files: Record<string, { content: string; mimeType: string }>;
-    assets: Record<string, { buffer: ArrayBuffer; mimeType: string }>;
+type VFS = {
+  files:  Record<string, { content: string; mimeType: string }>;
+  assets: Record<string, { buffer: ArrayBuffer; mimeType: string }>;
+};
+
+/** หาไฟล์ใน VFS จาก path (ลอง exact → ตัด ./ → แค่ basename) */
+function lookupFile(vfs: VFS, path: string): string | null {
+  if (!path || path.startsWith('http') || path.startsWith('//')) return null;
+  const clean = path.replace(/^\.\//, '').replace(/^\//, '');
+
+  if (vfs.files[clean])   return vfs.files[clean].content;
+  if (vfs.files[path])    return vfs.files[path].content;
+
+  // basename fallback: "js/utils.js" → "utils.js"
+  const base = clean.split('/').pop() ?? '';
+  if (base && vfs.files[base]) return vfs.files[base].content;
+
+  return null;
+}
+
+/** แปลง ArrayBuffer → base64 data URL */
+function bufferToDataURL(buffer: ArrayBuffer, mimeType: string): string {
+  const bytes = new Uint8Array(buffer);
+  let bin = '';
+  // Process in chunks to avoid call stack overflow
+  const CHUNK = 8192;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
   }
-): string {
-  let html = vfs.files['index.html']?.content ?? '<html><body><p>ไม่พบ index.html</p></body></html>';
-  const css = vfs.files['style.css']?.content ?? '';
-  const js = vfs.files['script.js']?.content ?? '';
+  return `data:${mimeType};base64,${btoa(bin)}`;
+}
 
-  const blobUrls: string[] = [];
+/** หา asset (รูปภาพ) ใน VFS แล้วคืน data URL */
+function lookupAssetDataURL(vfs: VFS, path: string): string | null {
+  if (!path || path.startsWith('data:') || path.startsWith('http') || path.startsWith('//')) {
+    return null;
+  }
+  const clean = path.replace(/^\.\//, '').replace(/^\//, '');
 
-  // Inject error capture + console override
-  const errorScript = `<script>
-    window.onerror = function(msg, src, line, col) {
-      window.parent.postMessage({type:'PREVIEW_ERROR', msg: String(msg), line: line, col: col}, '*');
-    };
-    window.addEventListener('unhandledrejection', function(e) {
-      window.parent.postMessage({type:'PREVIEW_ERROR', msg: String(e.reason)}, '*');
+  // ลอง asset ก่อน (รูปที่อัพโหลด)
+  const asset = vfs.assets[clean] ?? vfs.assets[path] ?? vfs.assets[clean.split('/').pop() ?? ''];
+  if (asset) return bufferToDataURL(asset.buffer, asset.mimeType);
+
+  // SVG / รูปที่เป็น text file ใน vfs.files
+  const svgContent = lookupFile(vfs, path);
+  if (svgContent && (path.endsWith('.svg') || svgContent.trim().startsWith('<svg'))) {
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgContent)}`;
+  }
+
+  return null;
+}
+
+export function buildPreview(vfs: VFS): string {
+  const rawHtml = vfs.files['index.html']?.content
+    ?? '<html><body><p style="font-family:sans-serif;padding:2rem;color:#888">ไม่พบ index.html</p></body></html>';
+
+  // ── Parse ด้วย DOMParser เพื่อความแม่นยำ ──────────────────
+  let doc: Document;
+  try {
+    doc = new DOMParser().parseFromString(rawHtml, 'text/html');
+  } catch {
+    return rawHtml;
+  }
+
+  // ── 1. Inline CSS (<link rel="stylesheet" href="...">) ──────
+  doc.querySelectorAll<HTMLLinkElement>('link[rel="stylesheet"][href]').forEach((link) => {
+    const href = link.getAttribute('href') ?? '';
+    const content = lookupFile(vfs, href);
+    if (content !== null) {
+      const style = doc.createElement('style');
+      style.setAttribute('data-src', href);
+      style.textContent = content;
+      link.parentNode?.replaceChild(style, link);
+    }
+  });
+
+  // ── 2. Inline JS (<script src="...">) ──────────────────────
+  // NOTE: ลบ type="module" เพราะ import ใน srcdoc ทำงานไม่ได้
+  doc.querySelectorAll<HTMLScriptElement>('script[src]').forEach((script) => {
+    const src = script.getAttribute('src') ?? '';
+    if (src.startsWith('http') || src.startsWith('//')) return; // CDN → ปล่อยไว้
+
+    const content = lookupFile(vfs, src);
+    if (content !== null) {
+      const newScript = doc.createElement('script');
+      newScript.setAttribute('data-src', src);
+      // ไม่คัดลอก type="module" — ใช้ classic script แทน
+      // copy defer/async ถ้ามี
+      if (script.hasAttribute('defer'))  newScript.setAttribute('defer', '');
+      if (script.hasAttribute('async'))  newScript.setAttribute('async', '');
+      newScript.textContent = content;
+      script.parentNode?.replaceChild(newScript, script);
+    }
+  });
+
+  // ── 3. แปลงรูปภาพ → data URL ────────────────────────────────
+  // <img src="picture/photo.jpg">
+  doc.querySelectorAll<HTMLImageElement>('img[src]').forEach((img) => {
+    const src = img.getAttribute('src') ?? '';
+    const dataUrl = lookupAssetDataURL(vfs, src);
+    if (dataUrl) img.setAttribute('src', dataUrl);
+  });
+
+  // background-image ใน inline style
+  doc.querySelectorAll<HTMLElement>('[style*="url("]').forEach((el) => {
+    const style = el.getAttribute('style') ?? '';
+    const replaced = style.replace(/url\(['"]?([^'")\s]+)['"]?\)/g, (_match, src) => {
+      const dataUrl = lookupAssetDataURL(vfs, src);
+      return dataUrl ? `url("${dataUrl}")` : _match;
     });
-    var _log = console.log.bind(console);
-    console.log = function() {
-      var a = Array.from(arguments).map(String);
-      window.parent.postMessage({type:'PREVIEW_LOG', args: a}, '*');
-      _log.apply(console, arguments);
-    };
-    var _warn = console.warn.bind(console);
-    console.warn = function() {
-      var a = Array.from(arguments).map(String);
-      window.parent.postMessage({type:'PREVIEW_WARN', args: a}, '*');
-      _warn.apply(console, arguments);
-    };
-  <\/script>`;
+    if (replaced !== style) el.setAttribute('style', replaced);
+  });
 
-  const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'self' blob: data: 'unsafe-inline' 'unsafe-eval' https://fonts.googleapis.com https://fonts.gstatic.com; connect-src 'none';">`;
+  // ── 4. แก้ href ลิงก์ภายในโปรเจกต์ (more.html → inline เปิดไม่ได้ แต่ไม่ crash) ──
+  doc.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
+    const href = a.getAttribute('href') ?? '';
+    // ถ้าเป็นไฟล์ .html ใน VFS และไม่ใช่ URL ภายนอก
+    if (!href.startsWith('http') && !href.startsWith('//') && !href.startsWith('#')) {
+      const target = lookupFile(vfs, href);
+      if (target !== null) {
+        // แสดง tooltip แต่ไม่เปิดได้ใน preview
+        a.setAttribute('title', `หน้า ${href} (เปิดได้เฉพาะ localhost)`);
+      }
+    }
+  });
 
-  if (html.includes('</head>')) {
-    html = html.replace('</head>', csp + errorScript + '</head>');
+  // ── 5. Inject error capture + console bridge ────────────────
+  const errorScript = doc.createElement('script');
+  errorScript.textContent = `
+(function(){
+  var _onerror = window.onerror;
+  window.onerror = function(msg, src, line, col, err) {
+    window.parent.postMessage({type:'PREVIEW_ERROR', msg:String(msg), line:line, col:col}, '*');
+    if(_onerror) _onerror.apply(this, arguments);
+  };
+  window.addEventListener('unhandledrejection', function(e){
+    window.parent.postMessage({type:'PREVIEW_ERROR', msg:String(e.reason||e.message||'Promise rejected')}, '*');
+  });
+  var _log  = console.log.bind(console);
+  var _warn = console.warn.bind(console);
+  var _err  = console.error.bind(console);
+  console.log = function(){
+    window.parent.postMessage({type:'PREVIEW_LOG',  args:Array.from(arguments).map(String)}, '*');
+    _log.apply(console, arguments);
+  };
+  console.warn = function(){
+    window.parent.postMessage({type:'PREVIEW_WARN', args:Array.from(arguments).map(String)}, '*');
+    _warn.apply(console, arguments);
+  };
+  console.error = function(){
+    window.parent.postMessage({type:'PREVIEW_ERROR', msg:Array.from(arguments).map(String).join(' ')}, '*');
+    _err.apply(console, arguments);
+  };
+})();`;
+
+  // แทรกต้น <head>
+  if (doc.head) {
+    doc.head.insertBefore(errorScript, doc.head.firstChild);
   } else {
-    html = csp + errorScript + html;
+    doc.documentElement.prepend(errorScript);
   }
 
-  if (css) {
-    const blob = new Blob([css], { type: 'text/css' });
-    const url = URL.createObjectURL(blob);
-    blobUrls.push(url);
-    html = html.replace(/href=["']style\.css["']/g, `href="${url}"`);
-  }
+  // ── 6. CSP ──────────────────────────────────────────────────
+  const cspMeta = doc.createElement('meta');
+  cspMeta.setAttribute('http-equiv', 'Content-Security-Policy');
+  cspMeta.setAttribute(
+    'content',
+    "default-src 'self' blob: data: 'unsafe-inline' 'unsafe-eval' https:; connect-src 'self' https:;"
+  );
+  doc.head?.insertBefore(cspMeta, doc.head.firstChild);
 
-  if (js) {
-    const blob = new Blob([js], { type: 'application/javascript' });
-    const url = URL.createObjectURL(blob);
-    blobUrls.push(url);
-    html = html.replace(/src=["']script\.js["']/g, `src="${url}"`);
-  }
-
-  for (const [name, asset] of Object.entries(vfs.assets)) {
-    const blob = new Blob([asset.buffer], { type: asset.mimeType });
-    const url = URL.createObjectURL(blob);
-    blobUrls.push(url);
-    const safe = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    html = html.replace(new RegExp(safe, 'g'), url);
-  }
-
-  previousBlobUrls.forEach((u) => URL.revokeObjectURL(u));
-  previousBlobUrls = blobUrls;
-
-  return html;
+  return '<!DOCTYPE html>' + doc.documentElement.outerHTML;
 }
