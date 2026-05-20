@@ -734,6 +734,63 @@ type IRange = {
 type IPosition = { lineNumber: number; column: number };
 
 // ────────────────────────────────────────────────────────────
+// HTML Emmet tags and helpers
+// ────────────────────────────────────────────────────────────
+
+const HTML_TAGS = [
+  'a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base', 'bdi',
+  'bdo', 'blockquote', 'body', 'br', 'button', 'canvas', 'caption', 'cite', 'code',
+  'col', 'colgroup', 'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog',
+  'div', 'dl', 'dt', 'em', 'embed', 'fieldset', 'figcaption', 'figure', 'footer',
+  'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hr', 'html', 'i',
+  'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'legend', 'li', 'link', 'main',
+  'map', 'mark', 'meta', 'meter', 'nav', 'noscript', 'object', 'ol', 'optgroup',
+  'option', 'output', 'p', 'param', 'picture', 'pre', 'progress', 'q', 'rp', 'rt',
+  'ruby', 's', 'samp', 'script', 'section', 'select', 'small', 'source', 'span',
+  'strong', 'style', 'sub', 'summary', 'sup', 'svg', 'table', 'tbody', 'td',
+  'template', 'textarea', 'tfoot', 'th', 'thead', 'time', 'title', 'tr', 'track',
+  'u', 'ul', 'var', 'video', 'wbr'
+];
+
+const HTML_TAGS_SET = new Set(HTML_TAGS);
+
+/** HTML void (self-closing) tags — ไม่ต้องมี closing tag */
+const VOID_TAGS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'param', 'source', 'track', 'wbr'
+]);
+
+function getInsertTextForTag(tag: string): string {
+  const t = tag.toLowerCase();
+  if (t === 'img') return '<img src="${1:}" alt="${2:}" />';
+  if (t === 'input') return '<input type="${1:text}" name="${2:}" id="${3:}" />';
+  if (t === 'link') return '<link rel="stylesheet" href="${1:}" />';
+  if (t === 'meta') return '<meta charset="UTF-8" />';
+  if (t === 'br') return '<br>';
+  if (t === 'hr') return '<hr>';
+  if (VOID_TAGS.has(t)) return `<${t} />`;
+
+  if (t === 'table') return '<table>\n\t$1\n</table>';
+  if (t === 'ul') return '<ul>\n\t$1\n</ul>';
+  if (t === 'ol') return '<ol>\n\t$1\n</ol>';
+  if (t === 'select') return '<select name="${1:}" id="${2:}">\n\t$3\n</select>';
+  if (t === 'form') return '<form action="${1:}" method="${2:post}">\n\t$3\n</form>';
+  if (t === 'head') return '<head>\n\t$1\n</head>';
+  if (t === 'html') return '<html>\n\t$1\n</html>';
+  if (t === 'body') return '<body>\n\t$1\n</body>';
+  
+  if (t === 'a') return '<a href="${1:#}">$2</a>';
+  if (t === 'script') return '<script src="${1:}"></script>';
+  if (t === 'style') return '<style>\n\t$1\n</style>';
+  if (t === 'button') return '<button type="${1:button}">$2</button>';
+  if (t === 'label') return '<label for="${1:}">$2</label>';
+  if (t === 'textarea') return '<textarea name="${1:}" id="${2:}" cols="${3:30}" rows="${4:10}">$5</textarea>';
+  if (t === 'iframe') return '<iframe src="${1:}" frameborder="0"></iframe>';
+  
+  return `<${t}>$1</${t}>`;
+}
+
+// ────────────────────────────────────────────────────────────
 // Register Monaco CompletionItemProvider for ONE language
 // Call once per (monaco, language) pair.
 // ────────────────────────────────────────────────────────────
@@ -748,6 +805,7 @@ export function registerCompletionProvider(
   if (_registered.has(monacoLang)) return;
   _registered.add(monacoLang);
 
+  // 1. ! snippet completion item provider
   monacoInstance.languages.registerCompletionItemProvider(monacoLang, {
     triggerCharacters: ['!'],
 
@@ -799,17 +857,59 @@ export function registerCompletionProvider(
       };
     },
   });
+
+  // 2. HTML Tag Emmet-like Completion Item Provider (for html/htm files)
+  if (monacoLang === 'html' || monacoLang === 'htm') {
+    monacoInstance.languages.registerCompletionItemProvider(monacoLang, {
+      provideCompletionItems(model: any, position: IPosition) {
+        const lineContent: string = model.getLineContent(position.lineNumber);
+        const textBefore = lineContent.substring(0, position.column - 1);
+        const word = model.getWordUntilPosition(position);
+        const currentTyped = word.word.toLowerCase();
+
+        if (!currentTyped) return { suggestions: [] };
+
+        // Check if there is a '<' immediately preceding the word
+        const hasLeftBracket = textBefore.trimEnd().endsWith('<' + word.word) || textBefore.endsWith('<');
+
+        const matchedTags = HTML_TAGS.filter((tag) => tag.startsWith(currentTyped));
+        if (matchedTags.length === 0) return { suggestions: [] };
+
+        return {
+          suggestions: matchedTags.map((tag) => {
+            const insertText = getInsertTextForTag(tag);
+            const startCol = hasLeftBracket
+              ? Math.max(1, position.column - currentTyped.length - 1)
+              : word.startColumn;
+
+            return {
+              label: tag,
+              kind: monacoInstance.languages.CompletionItemKind.Snippet,
+              detail: `HTML <${tag}> Tag`,
+              documentation: {
+                value: `Expand to \`${insertText.replace(/\$\d+|\$\{\d+:?([^}]*)\}/g, '$1')}\``,
+              },
+              insertText: insertText,
+              insertTextRules:
+                monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              range: {
+                startLineNumber: position.lineNumber,
+                startColumn: startCol,
+                endLineNumber: position.lineNumber,
+                endColumn: word.endColumn,
+              },
+              sortText: '00_' + tag, // prioritize HTML tags in suggestions
+            };
+          }),
+        };
+      },
+    });
+  }
 }
 
 // ────────────────────────────────────────────────────────────
 // Tab-key expansion — call once per editor instance
 // ────────────────────────────────────────────────────────────
-
-/** HTML void (self-closing) tags — ไม่ต้องมี closing tag */
-const VOID_TAGS = new Set([
-  'area','base','br','col','embed','hr','img','input',
-  'link','meta','param','source','track','wbr',
-]);
 
 export function registerTabExpansion(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -830,6 +930,22 @@ export function registerTabExpansion(
     // Don't expand when text is selected (user wants to indent block)
     if (selection && !selection.isEmpty()) return;
 
+    // ตรวจสอบว่า Suggestion Box (Autocomplete) เปิดอยู่หรือไม่
+    // ถ้าเปิดอยู่ ให้ข้ามการกด Tab เพื่อให้ระบบเลือกจากลิสต์แทนการทำ Tab-expansion
+    let isSuggestionOpen = false;
+    const suggestController = editor.getContribution('editor.contrib.suggestController') as any;
+    if (suggestController?.widget?.value) {
+      const widget = suggestController.widget.value;
+      if (typeof widget.isVisible === 'function') {
+        isSuggestionOpen = widget.isVisible();
+      } else if (widget.raw && typeof widget.raw.visible === 'boolean') {
+        isSuggestionOpen = widget.raw.visible;
+      } else if (typeof widget.visible === 'boolean') {
+        isSuggestionOpen = widget.visible;
+      }
+    }
+    if (isSuggestionOpen) return;
+
     const position: IPosition = editor.getPosition();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const model: any = editor.getModel();
@@ -839,9 +955,8 @@ export function registerTabExpansion(
     const textBefore = lineContent.substring(0, position.column - 1).trimStart();
 
     // ── 1. HTML tag auto-close (Emmet-like) ─────────────────
-    // พิมพ์ <table แล้วกด Tab → <table></table> cursor อยู่ข้างใน
     if (monacoLang === 'html' || monacoLang === 'htm') {
-      // ตรวจว่าบรรทัดลงท้ายด้วย <tagname หรือ <tagname attributes
+      // 1.1 ตรวจกรณีพิมพ์ <tagname แล้วกด Tab
       const tagMatch = textBefore.match(/<([a-zA-Z][a-zA-Z0-9-]*)([^>]*)$/);
       if (tagMatch) {
         const tag  = tagMatch[1];
@@ -851,19 +966,32 @@ export function registerTabExpansion(
         e.preventDefault();
         e.stopPropagation();
 
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const ctrl = editor.getContribution('snippetController2') as any;
         if (VOID_TAGS.has(tag.toLowerCase())) {
-          // Self-closing: <br, <img, <input → เติม > เท่านั้น
           ctrl?.insert(`${attrs}>$0`, { overwriteBefore: attrs.length });
         } else {
-          // Normal tag: แทน <tagname... ด้วย <tagname...>cursor</tagname>
           ctrl?.insert(
             `<${tag}${attrs}>$1</${tag}>$0`,
             { overwriteBefore: deleteLen }
           );
         }
         return;
+      }
+
+      // 1.2 ตรวจกรณีพิมพ์ tagname แบบไม่มี < แล้วกด Tab (เช่น table, div)
+      const wordMatch = textBefore.match(/([a-zA-Z][a-zA-Z0-9-]*)$/);
+      if (wordMatch) {
+        const tag = wordMatch[1];
+        if (HTML_TAGS_SET.has(tag.toLowerCase()) && !textBefore.endsWith('<' + tag)) {
+          const deleteLen = tag.length;
+          e.preventDefault();
+          e.stopPropagation();
+
+          const ctrl = editor.getContribution('snippetController2') as any;
+          const insertText = getInsertTextForTag(tag);
+          ctrl?.insert(insertText, { overwriteBefore: deleteLen });
+          return;
+        }
       }
     }
 
@@ -881,7 +1009,6 @@ export function registerTabExpansion(
     e.stopPropagation();
 
     // Use Monaco's snippetController2 for proper tab-stop navigation
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ctrl = editor.getContribution('snippetController2') as any;
     if (ctrl?.insert) {
       ctrl.insert(matched.body, { overwriteBefore: matched.trigger.length });
