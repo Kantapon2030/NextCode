@@ -5,6 +5,7 @@ import { loadAuthFromLocalStorage, isTokenExpired } from './services/googleAuth'
 import { getSetting } from './storage/db';
 import { ToastContainer } from './components/shared/Toast';
 import { LoadingSpinner } from './components/shared/LoadingSpinner';
+import { Download, X } from 'lucide-react';
 
 const LandingPage = lazy(() => import('./components/pages/LandingPage'));
 const Dashboard = lazy(() => import('./components/pages/Dashboard'));
@@ -19,6 +20,8 @@ export default function App() {
   const { user, setUser, setAccessToken, setTheme, setFontSize, setUserMode, theme } =
     useAppStore();
   const [authChecked, setAuthChecked] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallPrompt, setShowInstallPrompt] = useState(false);
 
   useEffect(() => {
     async function init() {
@@ -37,6 +40,44 @@ export default function App() {
     }
     init();
   }, []);
+
+  // ดักจับเหตุการณ์การขอติดตั้ง PWA
+  useEffect(() => {
+    const handler = (e: Event) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      
+      // ตรวจสอบว่าผู้ใช้เคยปิดป๊อปอัปติดตั้งล่าสุดเมื่อใด
+      const dismissedTime = localStorage.getItem('pwa_install_dismissed');
+      if (dismissedTime) {
+        const diff = Date.now() - parseInt(dismissedTime, 10);
+        const sevenDays = 7 * 24 * 60 * 60 * 1000;
+        if (diff < sevenDays) {
+          return; // ไม่ต้องแสดงรบกวนหากเพิ่งปิดไปไม่เกิน 7 วัน
+        }
+      }
+      setShowInstallPrompt(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) return;
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      console.log('User accepted the PWA install prompt');
+    }
+    setDeferredPrompt(null);
+    setShowInstallPrompt(false);
+  };
+
+  const handleDismissPrompt = () => {
+    localStorage.setItem('pwa_install_dismissed', Date.now().toString());
+    setShowInstallPrompt(false);
+  };
 
   useEffect(() => {
     const root = document.documentElement;
@@ -86,6 +127,47 @@ export default function App() {
           </Routes>
         </Suspense>
         <ToastContainer />
+
+        {/* PWA Custom Install Popup Banner */}
+        {showInstallPrompt && (
+          <div className="fixed bottom-6 right-6 z-[9999] max-w-sm w-[calc(100vw-3rem)] p-4 rounded-2xl border border-primary-500/20 bg-surface-950/95 backdrop-blur-md shadow-2xl flex flex-col gap-3 animate-in slide-in-from-bottom duration-300">
+            <div className="flex items-start justify-between">
+              <div className="flex gap-3">
+                <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-primary-600 to-indigo-600 flex items-center justify-center text-white font-extrabold text-xl shadow-md shrink-0">
+                  N
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold text-white">ติดตั้ง Nextcode IDE</h4>
+                  <p className="text-xs text-zinc-400 mt-0.5 leading-relaxed">
+                    ติดตั้งลงบนหน้าจอเพื่อรันแบบรวดเร็วออฟไลน์ และสัมผัสประสบการณ์ใช้งานแบบแอปพลิเคชันเต็มรูปแบบ
+                  </p>
+                </div>
+              </div>
+              <button 
+                onClick={handleDismissPrompt}
+                className="p-1 text-zinc-500 hover:text-white rounded-lg hover:bg-surface-800 transition-colors"
+                title="ปิด"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            
+            <div className="flex gap-2 justify-end mt-1">
+              <button
+                onClick={handleDismissPrompt}
+                className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 font-medium transition-colors"
+              >
+                ไว้ทีหลัง
+              </button>
+              <button
+                onClick={handleInstallClick}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-primary-600 hover:bg-primary-500 text-white font-semibold rounded-lg shadow-md transition-all duration-200"
+              >
+                <Download className="w-3.5 h-3.5" /> ติดตั้งเลย
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </BrowserRouter>
   );

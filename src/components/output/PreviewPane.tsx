@@ -1,9 +1,12 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { useAppStore, ConsoleEntry } from '../../store/appStore';
-import { RefreshCw, Smartphone, Monitor, Maximize2, AlertTriangle, X, Bot } from 'lucide-react';
+import { 
+  RefreshCw, Smartphone, Monitor, Maximize2, AlertTriangle, X, Bot,
+  ChevronLeft, ChevronRight, Home, Globe 
+} from 'lucide-react';
 
 interface Props {
-  html: string;
+  html?: string;
   onConsoleEntry: (entry: ConsoleEntry) => void;
   onAskAI: (error: string) => void;
 }
@@ -13,11 +16,64 @@ interface PreviewError {
   line?: number;
 }
 
-export function PreviewPane({ html, onConsoleEntry, onAskAI }: Props) {
+export function PreviewPane({ onConsoleEntry, onAskAI }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const { previewWidth, setPreviewWidth, theme } = useAppStore();
+  const { previewWidth, setPreviewWidth, theme, vfs, currentProject } = useAppStore();
+  const [currentFile, setCurrentFile] = useState('index.html');
+  const [history, setHistory] = useState<string[]>(['index.html']);
+  const [historyIndex, setHistoryIndex] = useState(0);
+  const [previewHtml, setPreviewHtml] = useState('');
   const [errors, setErrors] = useState<PreviewError[]>([]);
   const [key, setKey] = useState(0);
+
+  // รีเซ็ตไฟล์และประวัติการท่องเว็บเมื่อสลับโปรเจกต์
+  const projectId = currentProject?.id;
+  useEffect(() => {
+    setCurrentFile('index.html');
+    setHistory(['index.html']);
+    setHistoryIndex(0);
+    setErrors([]);
+  }, [projectId]);
+
+  // สร้าง preview ใหม่เมื่อ vfs หรือไฟล์ปัจจุบันเปลี่ยน
+  useEffect(() => {
+    const fileToBuild = vfs.files[currentFile] ? currentFile : 'index.html';
+    if (fileToBuild !== currentFile) {
+      setCurrentFile(fileToBuild);
+      setHistory([fileToBuild]);
+      setHistoryIndex(0);
+    }
+    setPreviewHtml(buildPreview(vfs, fileToBuild));
+  }, [vfs, currentFile]);
+
+  // จัดการประวัติการเปลี่ยนหน้า (Navigation)
+  const navigateTo = useCallback((file: string) => {
+    const nextHistory = history.slice(0, historyIndex + 1);
+    nextHistory.push(file);
+    setHistory(nextHistory);
+    setHistoryIndex(nextHistory.length - 1);
+    setCurrentFile(file);
+  }, [history, historyIndex]);
+
+  const goBack = useCallback(() => {
+    if (historyIndex > 0) {
+      const prevIndex = historyIndex - 1;
+      setHistoryIndex(prevIndex);
+      setCurrentFile(history[prevIndex]);
+    }
+  }, [history, historyIndex]);
+
+  const goForward = useCallback(() => {
+    if (historyIndex < history.length - 1) {
+      const nextIndex = historyIndex + 1;
+      setHistoryIndex(nextIndex);
+      setCurrentFile(history[nextIndex]);
+    }
+  }, [history, historyIndex]);
+
+  const goHome = useCallback(() => {
+    navigateTo('index.html');
+  }, [navigateTo]);
 
   useEffect(() => {
     const handler = (event: MessageEvent) => {
@@ -33,11 +89,16 @@ export function PreviewPane({ html, onConsoleEntry, onAskAI }: Props) {
           type,
           args: msg.args ?? [],
         });
+      } else if (msg.type === 'PREVIEW_NAVIGATE') {
+        const target = resolvePath(currentFile, msg.href);
+        if (vfs.files[target] || vfs.assets[target]) {
+          navigateTo(target);
+        }
       }
     };
     window.addEventListener('message', handler);
     return () => window.removeEventListener('message', handler);
-  }, [onConsoleEntry]);
+  }, [onConsoleEntry, currentFile, vfs, navigateTo]);
 
   function reload() {
     setKey((k) => k + 1);
@@ -61,7 +122,38 @@ export function PreviewPane({ html, onConsoleEntry, onAskAI }: Props) {
   return (
     <div className={`flex flex-col h-full border-l ${bg}`}>
       {/* Toolbar */}
-      <div className={`flex items-center gap-2 px-3 py-2 border-b shrink-0 ${toolbar}`}>
+      <div className={`flex items-center gap-1.5 px-3 py-2 border-b shrink-0 ${toolbar}`}>
+        <button
+          onClick={goBack}
+          disabled={historyIndex === 0}
+          className={`p-1.5 rounded-lg transition-colors ${
+            historyIndex === 0
+              ? 'text-zinc-600 cursor-not-allowed'
+              : 'text-zinc-400 hover:bg-surface-700 hover:text-white'
+          }`}
+          title="ย้อนกลับ"
+        >
+          <ChevronLeft className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={goForward}
+          disabled={historyIndex === history.length - 1}
+          className={`p-1.5 rounded-lg transition-colors ${
+            historyIndex === history.length - 1
+              ? 'text-zinc-600 cursor-not-allowed'
+              : 'text-zinc-400 hover:bg-surface-700 hover:text-white'
+          }`}
+          title="ไปข้างหน้า"
+        >
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+        <button
+          onClick={goHome}
+          className="p-1.5 hover:bg-surface-700 rounded-lg transition-colors text-zinc-400 hover:text-white"
+          title="หน้าแรก (index.html)"
+        >
+          <Home className="w-3.5 h-3.5" />
+        </button>
         <button
           onClick={reload}
           className="p-1.5 hover:bg-surface-700 rounded-lg transition-colors text-zinc-400 hover:text-white"
@@ -69,7 +161,14 @@ export function PreviewPane({ html, onConsoleEntry, onAskAI }: Props) {
         >
           <RefreshCw className="w-3.5 h-3.5" />
         </button>
-        <div className="flex gap-1 ml-1">
+
+        {/* Address Bar */}
+        <div className="flex-1 max-w-[120px] sm:max-w-[200px] flex items-center gap-1 px-2.5 py-1 bg-surface-900 border border-border rounded-lg text-xs text-zinc-400 font-mono truncate">
+          <Globe className="w-3 h-3 text-zinc-500 shrink-0" />
+          <span className="truncate">{currentFile}</span>
+        </div>
+
+        <div className="flex gap-0.5 ml-auto">
           {widths.map((w) => (
             <button
               key={w.value}
@@ -87,11 +186,11 @@ export function PreviewPane({ html, onConsoleEntry, onAskAI }: Props) {
         </div>
         <button
           onClick={() => {
-            const blob = new Blob([html], { type: 'text/html' });
+            const blob = new Blob([previewHtml], { type: 'text/html' });
             const url = URL.createObjectURL(blob);
             window.open(url, '_blank');
           }}
-          className="ml-auto p-1.5 hover:bg-surface-700 rounded-lg transition-colors text-zinc-400 hover:text-white"
+          className="p-1.5 hover:bg-surface-700 rounded-lg transition-colors text-zinc-400 hover:text-white"
           title="เปิดแท็บใหม่"
         >
           <Maximize2 className="w-3.5 h-3.5" />
@@ -127,7 +226,7 @@ export function PreviewPane({ html, onConsoleEntry, onAskAI }: Props) {
           <iframe
             key={key}
             ref={iframeRef}
-            srcDoc={html}
+            srcDoc={previewHtml}
             sandbox="allow-scripts allow-same-origin allow-modals allow-forms allow-popups allow-pointer-lock"
             title="ตัวอย่างเว็บ"
             className="w-full h-full border-0 bg-white"
@@ -187,7 +286,7 @@ function resolvePath(basePath: string, relativePath: string): string {
   return baseParts.join('/');
 }
 
-export function buildPreview(vfs: VFS): string {
+export function buildPreview(vfs: VFS, entryPoint: string = 'index.html'): string {
   // 1. ล้าง Blob URL เดิมออกให้หมดเพื่อป้องกัน memory leak
   clearActiveBlobUrls();
 
@@ -290,9 +389,9 @@ export function buildPreview(vfs: VFS): string {
     return '';
   }
 
-  // 2. ดึง index.html ออกมา parsing
-  const rawHtml = vfs.files['index.html']?.content
-    ?? '<html><body><p style="font-family:sans-serif;padding:2rem;color:#888">ไม่พบ index.html</p></body></html>';
+  // 2. ดึง HTML ไฟล์หลักที่ต้องการรันออกมา parsing
+  const rawHtml = vfs.files[entryPoint]?.content
+    ?? `<html><body><p style="font-family:sans-serif;padding:2rem;color:#888">ไม่พบ ${entryPoint}</p></body></html>`;
 
   let doc: Document;
   try {
@@ -319,7 +418,7 @@ export function buildPreview(vfs: VFS): string {
       if (importPath.startsWith('http') || importPath.startsWith('//') || importPath.startsWith('data:') || importPath.startsWith('blob:')) {
         return match;
       }
-      const target = resolvePath('index.html', importPath);
+      const target = resolvePath(entryPoint, importPath);
       const targetUrl = getBlobUrl(target);
       if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
         return urlPrefix ? `@import url("${targetUrl}");` : `@import "${targetUrl}";`;
@@ -331,7 +430,7 @@ export function buildPreview(vfs: VFS): string {
       if (urlPath.startsWith('http') || urlPath.startsWith('//') || urlPath.startsWith('data:') || urlPath.startsWith('blob:')) {
         return match;
       }
-      const target = resolvePath('index.html', urlPath);
+      const target = resolvePath(entryPoint, urlPath);
       const targetUrl = getBlobUrl(target);
       if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
         return `url("${targetUrl}")`;
@@ -356,7 +455,7 @@ export function buildPreview(vfs: VFS): string {
       let content = script.textContent ?? '';
       
       content = content.replace(/(import|export)\s+([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g, (match, type, exports, importPath) => {
-        const target = resolvePath('index.html', importPath);
+        const target = resolvePath(entryPoint, importPath);
         const targetUrl = getBlobUrl(target);
         if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
           return `${type} ${exports} from '${targetUrl}'`;
@@ -365,7 +464,7 @@ export function buildPreview(vfs: VFS): string {
       });
 
       content = content.replace(/import\s+['"]([^'"]+)['"]/g, (match, importPath) => {
-        const target = resolvePath('index.html', importPath);
+        const target = resolvePath(entryPoint, importPath);
         const targetUrl = getBlobUrl(target);
         if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
           return `import '${targetUrl}'`;
@@ -374,7 +473,7 @@ export function buildPreview(vfs: VFS): string {
       });
 
       content = content.replace(/import\s*\(\s*['"]([^'"]+)['"]\s*\)/g, (match, importPath) => {
-        const target = resolvePath('index.html', importPath);
+        const target = resolvePath(entryPoint, importPath);
         const targetUrl = getBlobUrl(target);
         if (targetUrl && targetUrl !== 'TEMPORARY_HINT') {
           return `import('${targetUrl}')`;
@@ -412,14 +511,14 @@ export function buildPreview(vfs: VFS): string {
   doc.querySelectorAll<HTMLAnchorElement>('a[href]').forEach((a) => {
     const href = a.getAttribute('href') ?? '';
     if (!href.startsWith('http') && !href.startsWith('//') && !href.startsWith('#')) {
-      const target = vfs.files[resolvePath('index.html', href)];
-      if (target) {
-        a.setAttribute('title', `หน้า ${href} (เปิดได้เฉพาะ localhost)`);
+      const target = resolvePath(entryPoint, href);
+      if (vfs.files[target]) {
+        a.setAttribute('title', `หน้า ${href}`);
       }
     }
   });
 
-  // 8. แทรกตัวดักจับ error + console bridge
+  // 8. แทรกตัวดักจับ error + console bridge + ดักจับลิงก์ภายใน
   const errorScript = doc.createElement('script');
   errorScript.textContent = `
 (function(){
@@ -446,6 +545,21 @@ export function buildPreview(vfs: VFS): string {
     window.parent.postMessage({type:'PREVIEW_ERROR', msg:Array.from(arguments).map(String).join(' ')}, '*');
     _err.apply(console, arguments);
   };
+
+  // ดักจับการคลิกเพื่อเปลี่ยนหน้าจำลอง (SPA-like)
+  document.addEventListener('click', function(e) {
+    var target = e.target;
+    while (target && target.tagName !== 'A') {
+      target = target.parentNode;
+    }
+    if (target && target.tagName === 'A') {
+      var href = target.getAttribute('href');
+      if (href && !href.startsWith('http') && !href.startsWith('//') && !href.startsWith('#') && !href.startsWith('javascript:')) {
+        e.preventDefault();
+        window.parent.postMessage({type: 'PREVIEW_NAVIGATE', href: href}, '*');
+      }
+    }
+  });
 })();`;
 
   if (doc.head) {
