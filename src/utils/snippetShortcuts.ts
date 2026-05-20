@@ -892,6 +892,7 @@ export function registerCompletionProvider(
               insertText: insertText,
               insertTextRules:
                 monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              filterText: hasLeftBracket ? '<' + tag : tag,
               range: {
                 startLineNumber: position.lineNumber,
                 startColumn: startCol,
@@ -934,14 +935,19 @@ export function registerTabExpansion(
     // ถ้าเปิดอยู่ ให้ข้ามการกด Tab เพื่อให้ระบบเลือกจากลิสต์แทนการทำ Tab-expansion
     let isSuggestionOpen = false;
     const suggestController = editor.getContribution('editor.contrib.suggestController') as any;
-    if (suggestController?.widget?.value) {
-      const widget = suggestController.widget.value;
-      if (typeof widget.isVisible === 'function') {
-        isSuggestionOpen = widget.isVisible();
-      } else if (widget.raw && typeof widget.raw.visible === 'boolean') {
-        isSuggestionOpen = widget.raw.visible;
-      } else if (typeof widget.visible === 'boolean') {
-        isSuggestionOpen = widget.visible;
+    if (suggestController) {
+      const widget = suggestController._widget || suggestController.widget;
+      if (widget) {
+        const widgetVal = widget.value || widget;
+        if (widgetVal) {
+          if (typeof widgetVal.isVisible === 'function') {
+            isSuggestionOpen = widgetVal.isVisible();
+          } else if (typeof widgetVal.visible === 'boolean') {
+            isSuggestionOpen = widgetVal.visible;
+          } else if (widgetVal.raw && typeof widgetVal.raw.visible === 'boolean') {
+            isSuggestionOpen = widgetVal.raw.visible;
+          }
+        }
       }
     }
     if (isSuggestionOpen) return;

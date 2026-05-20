@@ -46,6 +46,7 @@ export default function App() {
     const handler = (e: Event) => {
       e.preventDefault();
       setDeferredPrompt(e);
+      (window as any).deferredPrompt = e;
       
       // ตรวจสอบว่าผู้ใช้เคยปิดป๊อปอัปติดตั้งล่าสุดเมื่อใด
       const dismissedTime = localStorage.getItem('pwa_install_dismissed');
@@ -71,6 +72,7 @@ export default function App() {
       console.log('User accepted the PWA install prompt');
     }
     setDeferredPrompt(null);
+    (window as any).deferredPrompt = null;
     setShowInstallPrompt(false);
   };
 
@@ -133,9 +135,11 @@ export default function App() {
           <div className="fixed bottom-6 right-6 z-[9999] max-w-sm w-[calc(100vw-3rem)] p-4 rounded-2xl border border-primary-500/20 bg-surface-950/95 backdrop-blur-md shadow-2xl flex flex-col gap-3 animate-in slide-in-from-bottom duration-300">
             <div className="flex items-start justify-between">
               <div className="flex gap-3">
-                <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-primary-600 to-indigo-600 flex items-center justify-center text-white font-extrabold text-xl shadow-md shrink-0">
-                  N
-                </div>
+                <img
+                  src={`${import.meta.env.BASE_URL}icon-192.png`}
+                  alt="Nextcode Logo"
+                  className="w-12 h-12 rounded-xl object-cover shadow-md shrink-0"
+                />
                 <div>
                   <h4 className="text-sm font-semibold text-white">ติดตั้ง Nextcode IDE</h4>
                   <p className="text-xs text-zinc-400 mt-0.5 leading-relaxed">

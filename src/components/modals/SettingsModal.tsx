@@ -6,7 +6,7 @@ import { testApiKey } from '../../services/geminiAI';
 import { toast } from '../shared/Toast';
 import {
   X, Moon, Sun, Key, Trash2, CheckCircle, XCircle, Loader2,
-  Minus, Plus, User, Zap, ExternalLink
+  Minus, Plus, User, Zap, ExternalLink, Download
 } from 'lucide-react';
 
 interface Props { onClose: () => void; }
@@ -19,6 +19,35 @@ export default function SettingsModal({ onClose }: Props) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<'valid' | 'rate_limited' | 'invalid' | null>(null);
   const [showKeyInput, setShowKeyInput] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+
+  useEffect(() => {
+    const isStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone;
+    setIsStandalone(!!isStandaloneMode);
+
+    const prompt = (window as any).deferredPrompt;
+    if (prompt) {
+      setInstallPrompt(prompt);
+    }
+
+    const handler = (e: Event) => {
+      setInstallPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  async function handleInstallPWA() {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    const { outcome } = await installPrompt.userChoice;
+    if (outcome === 'accepted') {
+      toast('success', 'เริ่มทำการติดตั้งแอปพลิเคชัน');
+    }
+    (window as any).deferredPrompt = null;
+    setInstallPrompt(null);
+  }
 
   useEffect(() => {
     async function load() {
@@ -226,6 +255,33 @@ export default function SettingsModal({ onClose }: Props) {
                   )}
                 </div>
               </>
+            )}
+          </section>
+
+          {/* PWA Installation */}
+          <section className="pt-2">
+            <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">การติดตั้งแอปพลิเคชัน</h3>
+            {isStandalone ? (
+              <div className="flex items-center gap-2.5 p-3.5 bg-primary-500/10 border border-primary-500/20 rounded-xl text-green-400 text-xs">
+                <CheckCircle className="w-4 h-4 shrink-0 text-green-400" />
+                <span className="font-medium">ติดตั้งเป็นแอปพลิเคชันแล้วและกำลังรันแบบ Standalone</span>
+              </div>
+            ) : installPrompt ? (
+              <button
+                onClick={handleInstallPWA}
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-gradient-to-r from-primary-600 to-indigo-600 hover:from-primary-500 hover:to-indigo-500 text-white rounded-xl text-xs font-semibold shadow-md transition-all duration-200"
+              >
+                <Download className="w-4 h-4" /> ติดตั้ง Nextcode IDE ลงเครื่อง
+              </button>
+            ) : (
+              <div className="p-3.5 bg-surface-700/50 border border-border/50 rounded-xl space-y-2 text-[11px] text-zinc-400 leading-relaxed">
+                <p className="font-semibold text-zinc-300">วิธีติดตั้งเป็นแอปพลิเคชัน Shortcut:</p>
+                <ul className="list-disc list-inside space-y-1.5 pl-0.5">
+                  <li><strong>Chrome / Edge (คอมพิวเตอร์):</strong> คลิกไอคอนติดตั้ง <span className="text-zinc-200 font-semibold">⊕ (Install)</span> ที่ด้านขวาสุดของแถบที่อยู่ URL</li>
+                  <li><strong>iOS (Safari):</strong> กดปุ่ม <span className="text-zinc-200">แชร์ (Share)</span> และเลือก <span className="text-zinc-200 font-semibold">เพิ่มไปยังหน้าจอโฮม (Add to Home Screen)</span></li>
+                  <li><strong>Android (Chrome):</strong> กดเมนูสามจุด <span className="text-zinc-200">⋮</span> และเลือก <span className="text-zinc-200 font-semibold">ติดตั้งแอป (Install App)</span></li>
+                </ul>
+              </div>
             )}
           </section>
 

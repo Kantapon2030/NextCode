@@ -2,12 +2,15 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
-export default defineConfig({
-  base: '/',
+export default defineConfig(({ mode }) => ({
+  base: mode === 'production' ? '/NextCode/' : '/',
   plugins: [
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      devOptions: {
+        enabled: true
+      },
       manifest: {
         name: 'Nextcode IDE',
         short_name: 'Nextcode',
@@ -16,8 +19,8 @@ export default defineConfig({
         background_color: '#0f0f0f',
         display: 'standalone',
         icons: [
-          { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-          { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+          { src: 'icon-512.png', sizes: '512x512', type: 'image/png' },
         ],
       },
       workbox: {
@@ -59,4 +62,4 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
-})
+}))

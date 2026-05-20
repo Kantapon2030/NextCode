@@ -35,6 +35,8 @@ export function PreviewPane({ onConsoleEntry, onAskAI }: Props) {
     setErrors([]);
   }, [projectId]);
 
+  const lastFileRef = useRef(currentFile);
+
   // สร้าง preview ใหม่เมื่อ vfs หรือไฟล์ปัจจุบันเปลี่ยน
   useEffect(() => {
     const fileToBuild = vfs.files[currentFile] ? currentFile : 'index.html';
@@ -43,7 +45,23 @@ export function PreviewPane({ onConsoleEntry, onAskAI }: Props) {
       setHistory([fileToBuild]);
       setHistoryIndex(0);
     }
-    setPreviewHtml(buildPreview(vfs, fileToBuild));
+
+    // ล้างข้อผิดพลาดทันทีเมื่อมีการพิมพ์แก้ไขไฟล์หรือสลับไฟล์
+    setErrors([]);
+
+    const fileSwitched = lastFileRef.current !== fileToBuild;
+    lastFileRef.current = fileToBuild;
+
+    if (fileSwitched) {
+      // โหลดทันทีเมื่อสลับไฟล์
+      setPreviewHtml(buildPreview(vfs, fileToBuild));
+    } else {
+      // ดีเด้นซ์เฉพาะเมื่อมีการพิมพ์แก้ไขเนื้อหาในไฟล์เดิม (รอ 600ms)
+      const timer = setTimeout(() => {
+        setPreviewHtml(buildPreview(vfs, fileToBuild));
+      }, 600);
+      return () => clearTimeout(timer);
+    }
   }, [vfs, currentFile]);
 
   // จัดการประวัติการเปลี่ยนหน้า (Navigation)
@@ -380,6 +398,49 @@ export function buildPreview(vfs: VFS, entryPoint: string = 'index.html'): strin
       }
 
       const blob = new Blob([content], { type: file.mimeType });
+      const url = URL.createObjectURL(blob);
+      resolvedUrls[cleanPath] = url;
+      activeBlobUrls.push(url);
+      return url;
+    }
+
+    // 3. หากไม่พบไฟล์ใน VFS และเป็น relative/local path (ไม่ได้ขึ้นด้วย http, //, data, blob)
+    // ให้จำลองไฟล์เปล่าขึ้นมาเพื่อกันเบราว์เซอร์ส่ง request ไปหลังบ้านแล้วได้ HTML หน้าแรกกลับมาจนพัง
+    if (path && !path.startsWith('http') && !path.startsWith('//') && !path.startsWith('data:') && !path.startsWith('blob:')) {
+      const lower = cleanPath.toLowerCase();
+      let mimeType = 'text/plain';
+      let content = '';
+
+      const lastSegment = cleanPath.split('/').pop() || '';
+      const hasExtension = lastSegment.includes('.');
+
+      if (!hasExtension) {
+        // หากไม่มีนามสกุลไฟล์ ให้ถือว่าเป็น JS ไว้ก่อน (สำหรับ ES Modules import)
+        mimeType = 'application/javascript';
+        content = `/* Placeholder for missing module: ${cleanPath} */`;
+      } else if (lower.endsWith('.js') || lower.endsWith('.jsx') || lower.endsWith('.ts') || lower.endsWith('.tsx') || lower.endsWith('.mjs')) {
+        mimeType = 'application/javascript';
+        content = `/* Placeholder for missing file: ${cleanPath} */`;
+      } else if (lower.endsWith('.css')) {
+        mimeType = 'text/css';
+        content = `/* Placeholder for missing stylesheet: ${cleanPath} */`;
+      } else if (lower.endsWith('.svg')) {
+        mimeType = 'image/svg+xml';
+        content = '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>';
+      } else if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.gif') || lower.endsWith('.webp')) {
+        mimeType = 'image/gif';
+        // คืนค่าเป็น blob url ของ binary 1x1 transparent GIF เพื่อป้องกัน broken image link หรือการโหลด HTML
+        const binary = atob('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
+        const array = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) array[i] = binary.charCodeAt(i);
+        const blob = new Blob([array], { type: mimeType });
+        const url = URL.createObjectURL(blob);
+        resolvedUrls[cleanPath] = url;
+        activeBlobUrls.push(url);
+        return url;
+      }
+
+      const blob = new Blob([content], { type: mimeType });
       const url = URL.createObjectURL(blob);
       resolvedUrls[cleanPath] = url;
       activeBlobUrls.push(url);

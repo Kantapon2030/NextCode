@@ -29,17 +29,31 @@ export function StatusBar({ filename: _filename, language, line, col }: Props) {
   const bg = theme === 'dark' ? 'bg-surface-950 border-border text-zinc-400' : 'bg-zinc-100 border-zinc-200 text-zinc-600';
 
   return (
-    <div className={`flex items-center gap-4 px-4 h-6 text-xs border-t select-none shrink-0 ${bg}`}>
-      <span className="font-mono uppercase text-primary-400">{language}</span>
-      <span className="font-mono">บรรทัด {line}:{col}</span>
-      <span>UTF-8</span>
-      <div className={`flex items-center gap-1 ml-auto ${saveBadge.cls}`}>
-        {saveBadge.icon}
-        <span>{saveBadge.text}</span>
+    <div className={`flex items-center justify-between px-4 h-6 text-xs border-t select-none shrink-0 ${bg}`}>
+      {/* Left info */}
+      <div className="flex items-center gap-4">
+        <span className="font-mono uppercase text-primary-400">{language}</span>
+        <span className="font-mono">บรรทัด {line}:{col}</span>
+        <span>UTF-8</span>
       </div>
-      <div className={`flex items-center gap-1 ${syncBadge.cls}`}>
-        {syncBadge.icon}
-        <span>{syncBadge.text}</span>
+
+      {/* Center Branding */}
+      <div className="flex items-center gap-3 text-[9px] sm:text-[10px] text-zinc-500 font-medium tracking-widest">
+        <span className="hover:text-primary-400 transition-colors">DESIGN BY KANTAPON</span>
+        <span className="text-zinc-700 font-light">•</span>
+        <span className="hover:text-purple-400 transition-colors">POWERED BY GEMINI</span>
+      </div>
+
+      {/* Right info */}
+      <div className="flex items-center gap-4">
+        <div className={`flex items-center gap-1 ${saveBadge.cls}`}>
+          {saveBadge.icon}
+          <span>{saveBadge.text}</span>
+        </div>
+        <div className={`flex items-center gap-1 ${syncBadge.cls}`}>
+          {syncBadge.icon}
+          <span>{syncBadge.text}</span>
+        </div>
       </div>
     </div>
   );
