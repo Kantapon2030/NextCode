@@ -65,6 +65,19 @@ export function FileTree({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
+  const [showUploadMenu, setShowUploadMenu] = useState(false);
+  const uploadMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function close(e: MouseEvent) {
+      if (uploadMenuRef.current && !uploadMenuRef.current.contains(e.target as Node)) {
+        setShowUploadMenu(false);
+      }
+    }
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, []);
+
   // Close context menu on click
   useEffect(() => {
     function close() { setContextMenu(null); }
@@ -345,49 +358,61 @@ export function FileTree({
       </div>
 
       {/* Bottom action toolbar buttons */}
-      <div className={`flex items-center gap-0.5 px-2 py-1.5 border-t border-border ${theme === 'dark' ? 'bg-surface-950' : 'bg-zinc-100'}`}>
+      <div className={`flex items-center gap-1 px-1.5 py-1 border-t border-border select-none ${theme === 'dark' ? 'bg-surface-950' : 'bg-zinc-100'}`}>
         <button
           onClick={() => { setModalType('new_file'); setModalTargetNode(null); setModalInputVal(''); }}
-          className="flex items-center gap-1 px-2 py-1.5 hover:bg-primary-600/20 hover:text-primary-300 rounded-lg transition-colors text-zinc-400 text-xs font-medium"
+          className="flex items-center gap-0.5 px-1.5 py-1 hover:bg-primary-600/20 hover:text-primary-300 rounded-lg transition-colors text-zinc-400 text-[11px] font-medium"
           title="สร้างไฟล์ใหม่ที่ Root"
         >
-          <FilePlus className="w-3.5 h-3.5 shrink-0" />
+          <FilePlus className="w-3 h-3 shrink-0" />
           <span>ไฟล์</span>
         </button>
 
         <button
           onClick={() => { setModalType('new_folder'); setModalTargetNode(null); setModalInputVal(''); }}
-          className="flex items-center gap-1 px-2 py-1.5 hover:bg-amber-600/20 hover:text-amber-300 rounded-lg transition-colors text-zinc-400 text-xs font-medium"
+          className="flex items-center gap-0.5 px-1.5 py-1 hover:bg-amber-600/20 hover:text-amber-300 rounded-lg transition-colors text-zinc-400 text-[11px] font-medium"
           title="สร้างโฟลเดอร์ใหม่ที่ Root"
         >
-          <FolderPlus className="w-3.5 h-3.5 shrink-0" />
+          <FolderPlus className="w-3 h-3 shrink-0" />
           <span>โฟลเดอร์</span>
         </button>
 
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-1 px-2 py-1.5 hover:bg-surface-700 rounded-lg transition-colors text-zinc-500 hover:text-zinc-300 text-xs"
-          title="อัปโหลดไฟล์"
-        >
-          <Upload className="w-3.5 h-3.5 shrink-0" />
-          <span className="hidden sm:inline">อัปโหลด</span>
-        </button>
-
-        <button
-          onClick={() => folderInputRef.current?.click()}
-          className="flex items-center gap-1 px-2 py-1.5 hover:bg-surface-700 rounded-lg transition-colors text-zinc-500 hover:text-zinc-300 text-xs"
-          title="นำเข้าทั้งโฟลเดอร์"
-        >
-          <FolderOpen className="w-3.5 h-3.5 shrink-0" />
-          <span className="hidden sm:inline">นำเข้า</span>
-        </button>
+        <div className="relative" ref={uploadMenuRef}>
+          <button
+            onClick={() => setShowUploadMenu(!showUploadMenu)}
+            className="flex items-center gap-0.5 px-1.5 py-1 hover:bg-surface-700 rounded-lg transition-colors text-zinc-400 hover:text-zinc-200 text-[11px] font-medium"
+            title="อัปโหลดไฟล์ / นำเข้าโฟลเดอร์"
+          >
+            <Upload className="w-3 h-3 shrink-0" />
+            <span>อัปโหลด</span>
+            <ChevronDown className="w-2.5 h-2.5 shrink-0 opacity-60" />
+          </button>
+          {showUploadMenu && (
+            <div className="absolute bottom-full left-0 mb-1.5 w-32 bg-surface-800 border border-border rounded-lg shadow-xl z-50 py-1 text-[11px] animate-slide-down">
+              <button
+                onClick={() => { fileInputRef.current?.click(); setShowUploadMenu(false); }}
+                className="w-full flex items-center gap-1.5 px-2 py-1.5 text-zinc-300 hover:bg-surface-700 hover:text-white transition-colors text-left font-medium"
+              >
+                <Upload className="w-3 h-3 shrink-0" />
+                <span>อัปโหลดไฟล์</span>
+              </button>
+              <button
+                onClick={() => { folderInputRef.current?.click(); setShowUploadMenu(false); }}
+                className="w-full flex items-center gap-1.5 px-2 py-1.5 text-zinc-300 hover:bg-surface-700 hover:text-white transition-colors text-left font-medium"
+              >
+                <FolderOpen className="w-3 h-3 shrink-0" />
+                <span>นำเข้าโฟลเดอร์</span>
+              </button>
+            </div>
+          )}
+        </div>
 
         <button
           onClick={() => setShowCheatSheet(true)}
-          className="flex items-center gap-1 px-2 py-1.5 hover:bg-primary-700/30 rounded-lg transition-colors text-zinc-500 hover:text-primary-300 text-xs ml-auto"
+          className="flex items-center gap-0.5 px-1.5 py-1 hover:bg-primary-700/30 rounded-lg transition-colors text-zinc-500 hover:text-primary-300 text-[11px] ml-auto"
           title="Snippet Shortcuts"
         >
-          <Keyboard className="w-3.5 h-3.5 shrink-0" />
+          <Keyboard className="w-3 h-3 shrink-0" />
         </button>
       </div>
 

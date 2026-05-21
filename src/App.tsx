@@ -17,7 +17,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { user, setUser, setAccessToken, setTheme, setFontSize, setUserMode, setAutoSyncDrive, theme } =
+  const { user, setUser, setAccessToken, setTheme, setFontSize, setUserMode, theme } =
     useAppStore();
   const [authChecked, setAuthChecked] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -33,11 +33,9 @@ export default function App() {
       const savedTheme = await getSetting<'dark' | 'light'>('theme', 'dark');
       const savedFont = await getSetting<number>('font_size', 14);
       const savedMode = await getSetting<'beginner' | 'expert'>('user_mode', 'beginner');
-      const savedAutoSync = await getSetting<boolean>('auto_sync_drive', true);
       setTheme(savedTheme);
       setFontSize(savedFont);
       setUserMode(savedMode);
-      setAutoSyncDrive(savedAutoSync);
       setAuthChecked(true);
     }
     init();

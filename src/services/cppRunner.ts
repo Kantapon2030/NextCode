@@ -43,7 +43,65 @@ export async function compileAndRun(
   const options = language === 'c' ? '-O2 -Wall -std=c11' : '-O2 -Wall -std=c++17';
   const inputsUsed = stdin.split('\n').map(l => l.trim()).filter(l => l !== '');
 
-  // ─── Primary: Wandbox ───────────────────────────────────────────────────
+  // ─── Primary: Piston API ────────────────────────────────────────────────
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 20000);
+
+    const pistonLang = language === 'c' ? 'c' : 'cpp';
+    const filename = language === 'c' ? 'main.c' : 'main.cpp';
+
+    const res = await fetch('https://emkc.org/api/v2/piston/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: controller.signal,
+      body: JSON.stringify({
+        language: pistonLang,
+        version: '*',
+        files: [
+          {
+            name: filename,
+            content: code,
+          }
+        ],
+        stdin,
+      }),
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) throw new Error(`Piston HTTP ${res.status}`);
+
+    const data = await res.json() as {
+      run?: {
+        stdout?: string;
+        stderr?: string;
+        code?: number;
+        output?: string;
+      };
+    };
+
+    if (data.run) {
+      const stdout = data.run.stdout ?? '';
+      const stderr = data.run.stderr ?? '';
+      const status = data.run.code ?? 0;
+      const errors = parseGccErrors(stderr);
+
+      return {
+        stdout,
+        stderr,
+        status,
+        exitCode: status,
+        inputsUsed,
+        compileError: stderr || undefined,
+        errors
+      };
+    }
+    throw new Error('Piston invalid response format');
+  } catch (primaryErr) {
+    console.warn('[cppRunner] Piston failed, trying Wandbox:', primaryErr);
+  }
+
+  // ─── Fallback 1: Wandbox ─────────────────────────────────────────────────
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
@@ -91,12 +149,11 @@ export async function compileAndRun(
       compileError: compilerError || undefined,
       errors
     };
-  } catch (primaryErr) {
-    // timeout, network error, or 5xx → fallback to Godbolt
-    console.warn('[cppRunner] Wandbox failed, trying Godbolt:', primaryErr);
+  } catch (wandboxErr) {
+    console.warn('[cppRunner] Wandbox failed, trying Godbolt:', wandboxErr);
   }
 
-  // ─── Fallback: Godbolt ──────────────────────────────────────────────────
+  // ─── Fallback 2: Godbolt ────────────────────────────────────────────────
   try {
     const compilerId = language === 'c' ? 'cg122' : 'g122';
     const controller = new AbortController();

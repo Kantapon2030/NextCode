@@ -6,13 +6,13 @@ import { testApiKey } from '../../services/geminiAI';
 import { toast } from '../shared/Toast';
 import {
   X, Moon, Sun, Key, Trash2, CheckCircle, XCircle, Loader2,
-  Minus, Plus, User, Zap, ExternalLink, Download, Cloud, CloudOff
+  Minus, Plus, User, Zap, ExternalLink, Download
 } from 'lucide-react';
 
 interface Props { onClose: () => void; }
 
 export default function SettingsModal({ onClose }: Props) {
-  const { user, theme, setTheme, fontSize, setFontSize, userMode, setUserMode, autoSyncDrive, setAutoSyncDrive } = useAppStore();
+  const { user, theme, setTheme, fontSize, setFontSize, userMode, setUserMode } = useAppStore();
   const [apiKey, setApiKey] = useState('');
   const [maskedKey, setMaskedKey] = useState('');
   const [newKey, setNewKey] = useState('');
@@ -109,10 +109,7 @@ export default function SettingsModal({ onClose }: Props) {
     await setSetting('user_mode', m);
   }
 
-  async function handleAutoSync(v: boolean) {
-    setAutoSyncDrive(v);
-    await setSetting('auto_sync_drive', v);
-  }
+
 
   return (
     <div className="fixed inset-0 z-[999] flex items-center justify-center bg-black/70 backdrop-blur-sm">
@@ -163,42 +160,7 @@ export default function SettingsModal({ onClose }: Props) {
             </div>
           </section>
 
-          {/* Google Drive Auto Sync */}
-          <section>
-            <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">Google Drive Sync</h3>
-            <div
-              onClick={() => handleAutoSync(!autoSyncDrive)}
-              className={`flex items-center justify-between p-3.5 rounded-xl border-2 cursor-pointer transition-all ${
-                autoSyncDrive
-                  ? 'border-emerald-500/60 bg-emerald-500/10'
-                  : 'border-border bg-surface-700'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                {autoSyncDrive
-                  ? <Cloud className="w-4 h-4 text-emerald-400" />
-                  : <CloudOff className="w-4 h-4 text-zinc-500" />}
-                <div>
-                  <p className={`text-sm font-medium ${ autoSyncDrive ? 'text-emerald-300' : 'text-zinc-400' }`}>
-                    {autoSyncDrive ? 'ซิงก์อัตโนมัติ (เปิด)' : 'ซิงก์อัตโนมัติ (ปิด)'}
-                  </p>
-                  <p className="text-[11px] text-zinc-600 mt-0.5">
-                    {autoSyncDrive
-                      ? 'บันทึกโค้ดขึ้น Google Drive ทุกครั้งที่แก้ไข'
-                      : 'ไม่บันทึกขึ้น Drive จนกว่าจะกดปุ่ม Drive'}
-                  </p>
-                </div>
-              </div>
-              {/* Toggle switch */}
-              <div className={`w-10 h-5 rounded-full transition-colors relative ${
-                autoSyncDrive ? 'bg-emerald-500' : 'bg-zinc-700'
-              }`}>
-                <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all ${
-                  autoSyncDrive ? 'left-5' : 'left-0.5'
-                }`} />
-              </div>
-            </div>
-          </section>
+
 
           {/* Mode */}
           <section>

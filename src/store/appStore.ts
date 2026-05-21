@@ -71,7 +71,6 @@ interface AppState {
   theme: 'dark' | 'light';
   fontSize: number;
   showMultiTabBanner: boolean;
-  autoSyncDrive: boolean;
 
   setUser: (user: User | null) => void;
   setAccessToken: (token: string | null, expiry: number | null) => void;
@@ -107,7 +106,6 @@ interface AppState {
   setTheme: (theme: 'dark' | 'light') => void;
   setFontSize: (size: number) => void;
   setShowMultiTabBanner: (show: boolean) => void;
-  setAutoSyncDrive: (v: boolean) => void;
   resetProjectState: () => void;
   logout: () => void;
 }
@@ -138,7 +136,6 @@ export const useAppStore = create<AppState>((set) => ({
   theme: 'dark',
   fontSize: 14,
   showMultiTabBanner: false,
-  autoSyncDrive: true,
 
   setUser: (user) => set({ user }),
   setAccessToken: (accessToken, tokenExpiry) => set({ accessToken, tokenExpiry }),
@@ -256,7 +253,6 @@ export const useAppStore = create<AppState>((set) => ({
   setTheme: (theme) => set({ theme }),
   setFontSize: (fontSize) => set({ fontSize }),
   setShowMultiTabBanner: (showMultiTabBanner) => set({ showMultiTabBanner }),
-  setAutoSyncDrive: (autoSyncDrive) => set({ autoSyncDrive }),
   resetProjectState: () =>
     set({
       openTabs: [],

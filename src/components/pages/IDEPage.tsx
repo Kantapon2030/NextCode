@@ -7,7 +7,6 @@ import {
   getMimeType, getMonacoLanguage
 } from '../../storage/vfsHelpers';
 import { broadcastVFSUpdate, initBroadcastChannel } from '../../storage/syncManager';
-import { createProjectFolder, syncTreeToDrive } from '../../services/googleDrive';
 import { ErrorBoundary } from '../shared/ErrorBoundary';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { toast } from '../shared/Toast';
@@ -46,14 +45,13 @@ export default function IDEPage() {
     currentProject, setCurrentProject,
     vfs, setVFS, updateVFSFile,
     openTabs, activeTab, openTab, closeTab, setActiveTab,
-    setSaveStatus, setSyncStatus, syncStatus,
+    setSaveStatus,
     activeLanguage, setActiveLanguage,
     previewMode, setPreviewMode,
     aiPanelOpen, setAIPanelOpen,
     commandPaletteOpen, setCommandPaletteOpen,
     showMultiTabBanner, setShowMultiTabBanner,
     addConsoleEntry, clearConsole,
-    accessToken, autoSyncDrive,
     resetProjectState,
     theme,
   } = store;
@@ -147,30 +145,7 @@ export default function IDEPage() {
     broadcastVFSUpdate(projectId);
     setDirtyTabs((prev) => { const next = new Set(prev); next.delete(filename); return next; });
     setSaveStatus('saved');
-    // Auto-sync to Drive silently (no toast)
-    if (autoSyncDrive) {
-      debouncedDriveSync();
-    }
   }, 4000);
-
-  // Debounced Drive sync — fires 8s after last edit to avoid spam
-  const debouncedDriveSync = useDebouncedCallback(async () => {
-    if (!projectId || !accessToken || !currentProject) return;
-    try {
-      setSyncStatus('syncing');
-      let folderId = currentProject.drive_folder_id;
-      if (!folderId) {
-        folderId = await createProjectFolder(currentProject.name, projectId, accessToken);
-        await db.projects.update(projectId, { drive_folder_id: folderId });
-        store.updateProject(projectId, { drive_folder_id: folderId });
-      }
-      const latestVFS = useAppStore.getState().vfs;
-      await syncTreeToDrive(projectId, accessToken, folderId, latestVFS.tree);
-      setSyncStatus('synced');
-    } catch {
-      setSyncStatus('error');
-    }
-  }, 8000);
 
   async function handleManualSave() {
     if (!projectId || !activeTab) return;
@@ -181,36 +156,6 @@ export default function IDEPage() {
     setDirtyTabs((prev) => { const next = new Set(prev); next.delete(activeTab); return next; });
     setSaveStatus('saved');
     toast('success', '✓ บันทึกแล้ว');
-    // Trigger auto-sync silently on manual save too
-    if (autoSyncDrive) debouncedDriveSync();
-  }
-
-  async function handleDriveSync() {
-    if (!projectId || !accessToken || !currentProject) {
-      toast('error', 'กรุณาเข้าสู่ระบบ Google Drive ก่อน');
-      return;
-    }
-    try {
-      setSyncStatus('syncing');
-      let folderId = currentProject.drive_folder_id;
-      if (!folderId) {
-        folderId = await createProjectFolder(currentProject.name, projectId, accessToken);
-        await db.projects.update(projectId, { drive_folder_id: folderId });
-        store.updateProject(projectId, { drive_folder_id: folderId });
-      }
-      await syncTreeToDrive(projectId, accessToken, folderId, vfs.tree);
-      setSyncStatus('synced');
-      toast('success', '☁ Sync to Google Drive สำเร็จ');
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      if (msg === 'TOKEN_EXPIRED') {
-        setSyncStatus('error');
-        toast('error', 'Token หมดอายุ กรุณา login ใหม่');
-      } else {
-        setSyncStatus('error');
-        toast('error', `Sync ล้มเหลว: ${msg}`);
-      }
-    }
   }
 
   // File tree ops
@@ -319,7 +264,7 @@ export default function IDEPage() {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Navbar */}
       <ErrorBoundary>
-        <Navbar onSave={handleManualSave} onToggleCommandPalette={() => setCommandPaletteOpen(true)} onDriveSync={handleDriveSync} />
+        <Navbar onSave={handleManualSave} onToggleCommandPalette={() => setCommandPaletteOpen(true)} />
       </ErrorBoundary>
 
       {/* Multi-tab banner */}
