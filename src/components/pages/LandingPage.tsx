@@ -42,7 +42,7 @@ const features = [
   {
     icon: <CloudOff className="w-6 h-6" />,
     title: 'บันทึกอัตโนมัติ',
-    desc: 'บันทึกใน Browser และ Google Drive ทำงานได้แม้ไม่มีอินเทอร์เน็ต',
+    desc: 'บันทึกใน Web Browser บนเครื่องของคุณโดยตรง ทำงานได้รวดเร็วแม้ไม่มีอินเทอร์เน็ต',
     color: 'from-green-500 to-emerald-500',
   },
 ];
@@ -192,7 +192,7 @@ export default function LandingPage() {
             )}
 
             <p className="text-xs text-zinc-600">
-              ข้อมูลทั้งหมดเก็บใน Google Drive ของคุณ · ไม่มี server เก็บข้อมูล
+              ข้อมูลทั้งหมดเก็บในเบราว์เซอร์ของคุณโดยตรง · ปลอดภัย ไม่ผ่านเซิร์ฟเวอร์
             </p>
           </div>
 
