@@ -109,7 +109,7 @@ export default function LandingPage() {
     }
     setLoading(true);
     setError('');
-    tokenClientRef.current.requestAccessToken({ prompt: 'consent' });
+    tokenClientRef.current.requestAccessToken({ prompt: 'select_account' });
   }
 
   return (
