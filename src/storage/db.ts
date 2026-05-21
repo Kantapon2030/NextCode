@@ -94,11 +94,12 @@ export class NextcodeDB extends Dexie {
       terminal_history: '++id, project_id, timestamp, type',
       custom_snippets: '++id, trigger, language, createdAt',
     });
-    // v3: migrate flat files & assets to tree files structure
+    // v3: Delete old files & assets tables and copy data to filesTemp
     this.version(3).stores({
       projects: '&id, name, language, template, created_at, updated_at, drive_folder_id',
-      files: '&[project_id+path], project_id, path, name, parent_path, type, drive_file_id, is_dirty, updated_at, [project_id+parent_path]',
-      assets: '&[project_id+name], project_id, name, is_dirty',
+      files: null,
+      assets: null,
+      filesTemp: '&[project_id+path], project_id, path, name, parent_path, type, drive_file_id, is_dirty, updated_at, [project_id+parent_path]',
       snapshots: '++id, project_id, timestamp, type',
       settings: '&key',
       terminal_history: '++id, project_id, timestamp, type',
@@ -106,13 +107,13 @@ export class NextcodeDB extends Dexie {
     }).upgrade(async tx => {
       // 1. Migrate files
       const oldFiles = await tx.table('files').toArray();
-      await tx.table('files').clear();
+      const tempRecords: any[] = [];
       for (const f of oldFiles) {
         const path = f.filename || f.path || '';
         const parts = path.split('/').filter(Boolean);
         const name = parts[parts.length - 1] || '';
         const parent_path = parts.slice(0, parts.length - 1).join('/');
-        await tx.table('files').put({
+        tempRecords.push({
           project_id: f.project_id,
           path,
           name,
@@ -126,14 +127,14 @@ export class NextcodeDB extends Dexie {
         });
       }
 
-      // 2. Migrate assets to files
+      // 2. Migrate assets to filesTemp
       const oldAssets = await tx.table('assets').toArray();
       for (const a of oldAssets) {
         const path = a.name || '';
         const parts = path.split('/').filter(Boolean);
         const name = parts[parts.length - 1] || '';
         const parent_path = parts.slice(0, parts.length - 1).join('/');
-        await tx.table('files').put({
+        tempRecords.push({
           project_id: a.project_id,
           path,
           name,
@@ -146,11 +147,47 @@ export class NextcodeDB extends Dexie {
           updated_at: Date.now(),
         });
       }
+
+      await tx.table('filesTemp').bulkAdd(tempRecords);
+    });
+
+    // v4: Recreate original files table with the new schema and restore data from filesTemp
+    this.version(4).stores({
+      projects: '&id, name, language, template, created_at, updated_at, drive_folder_id',
+      files: '&[project_id+path], project_id, path, name, parent_path, type, drive_file_id, is_dirty, updated_at, [project_id+parent_path]',
+      filesTemp: null,
+      snapshots: '++id, project_id, timestamp, type',
+      settings: '&key',
+      terminal_history: '++id, project_id, timestamp, type',
+      custom_snippets: '++id, trigger, language, createdAt',
+    }).upgrade(async tx => {
+      const tempFiles = await tx.table('filesTemp').toArray();
+      await tx.table('files').bulkAdd(tempFiles);
     });
   }
 }
 
 export const db = new NextcodeDB();
+
+// Handle schema/version/upgrade errors by deleting database and reloading
+db.open().catch(async (err) => {
+  console.error("Failed to open IndexedDB:", err);
+  if (
+    err.name === 'VersionError' ||
+    err.name === 'UpgradeError' ||
+    err.name === 'SchemaError' ||
+    err.message?.includes('Version') ||
+    err.message?.includes('upgrade')
+  ) {
+    console.warn("Schema mismatch or version error. Deleting database to recover...");
+    try {
+      await Dexie.delete('NextcodeIDE_v1');
+      window.location.reload();
+    } catch (deleteErr) {
+      console.error("Failed to delete database:", deleteErr);
+    }
+  }
+});
 
 export async function getSetting<T>(key: string, defaultValue: T): Promise<T> {
   const s = await db.settings.get(key);
