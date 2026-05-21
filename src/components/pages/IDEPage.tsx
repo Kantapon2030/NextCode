@@ -147,7 +147,30 @@ export default function IDEPage() {
     broadcastVFSUpdate(projectId);
     setDirtyTabs((prev) => { const next = new Set(prev); next.delete(filename); return next; });
     setSaveStatus('saved');
+    // Auto-sync to Drive silently (no toast)
+    if (autoSyncDrive) {
+      debouncedDriveSync();
+    }
   }, 4000);
+
+  // Debounced Drive sync — fires 8s after last edit to avoid spam
+  const debouncedDriveSync = useDebouncedCallback(async () => {
+    if (!projectId || !accessToken || !currentProject) return;
+    try {
+      setSyncStatus('syncing');
+      let folderId = currentProject.drive_folder_id;
+      if (!folderId) {
+        folderId = await createProjectFolder(currentProject.name, projectId, accessToken);
+        await db.projects.update(projectId, { drive_folder_id: folderId });
+        store.updateProject(projectId, { drive_folder_id: folderId });
+      }
+      const latestVFS = useAppStore.getState().vfs;
+      await syncTreeToDrive(projectId, accessToken, folderId, latestVFS.tree);
+      setSyncStatus('synced');
+    } catch {
+      setSyncStatus('error');
+    }
+  }, 8000);
 
   async function handleManualSave() {
     if (!projectId || !activeTab) return;
@@ -158,6 +181,8 @@ export default function IDEPage() {
     setDirtyTabs((prev) => { const next = new Set(prev); next.delete(activeTab); return next; });
     setSaveStatus('saved');
     toast('success', '✓ บันทึกแล้ว');
+    // Trigger auto-sync silently on manual save too
+    if (autoSyncDrive) debouncedDriveSync();
   }
 
   async function handleDriveSync() {

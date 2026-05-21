@@ -345,50 +345,49 @@ export function FileTree({
       </div>
 
       {/* Bottom action toolbar buttons */}
-      <div className={`flex items-center gap-1 px-2 py-2 border-t border-border ${theme === 'dark' ? 'bg-surface-950' : 'bg-zinc-100'}`}>
+      <div className={`flex items-center gap-0.5 px-2 py-1.5 border-t border-border ${theme === 'dark' ? 'bg-surface-950' : 'bg-zinc-100'}`}>
         <button
           onClick={() => { setModalType('new_file'); setModalTargetNode(null); setModalInputVal(''); }}
-          className="flex items-center gap-1 px-2 py-1.5 hover:bg-surface-700 rounded-lg transition-colors text-zinc-400 hover:text-white text-xs"
+          className="flex items-center gap-1 px-2 py-1.5 hover:bg-primary-600/20 hover:text-primary-300 rounded-lg transition-colors text-zinc-400 text-xs font-medium"
           title="สร้างไฟล์ใหม่ที่ Root"
         >
-          <FilePlus className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">ไฟล์ใหม่</span>
+          <FilePlus className="w-3.5 h-3.5 shrink-0" />
+          <span>ไฟล์</span>
         </button>
 
         <button
           onClick={() => { setModalType('new_folder'); setModalTargetNode(null); setModalInputVal(''); }}
-          className="flex items-center gap-1 px-2 py-1.5 hover:bg-surface-700 rounded-lg transition-colors text-zinc-400 hover:text-white text-xs"
+          className="flex items-center gap-1 px-2 py-1.5 hover:bg-amber-600/20 hover:text-amber-300 rounded-lg transition-colors text-zinc-400 text-xs font-medium"
           title="สร้างโฟลเดอร์ใหม่ที่ Root"
         >
-          <FolderPlus className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">โฟลเดอร์ใหม่</span>
+          <FolderPlus className="w-3.5 h-3.5 shrink-0" />
+          <span>โฟลเดอร์</span>
         </button>
 
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-1 px-2 py-1.5 hover:bg-surface-700 rounded-lg transition-colors text-zinc-400 hover:text-white text-xs"
+          className="flex items-center gap-1 px-2 py-1.5 hover:bg-surface-700 rounded-lg transition-colors text-zinc-500 hover:text-zinc-300 text-xs"
           title="อัปโหลดไฟล์"
         >
-          <Upload className="w-3.5 h-3.5" />
+          <Upload className="w-3.5 h-3.5 shrink-0" />
           <span className="hidden sm:inline">อัปโหลด</span>
         </button>
 
         <button
           onClick={() => folderInputRef.current?.click()}
-          className="flex items-center gap-1 px-2 py-1.5 hover:bg-surface-700 rounded-lg transition-colors text-zinc-400 hover:text-white text-xs"
+          className="flex items-center gap-1 px-2 py-1.5 hover:bg-surface-700 rounded-lg transition-colors text-zinc-500 hover:text-zinc-300 text-xs"
           title="นำเข้าทั้งโฟลเดอร์"
         >
-          <FolderOpen className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">โฟลเดอร์</span>
+          <FolderOpen className="w-3.5 h-3.5 shrink-0" />
+          <span className="hidden sm:inline">นำเข้า</span>
         </button>
 
         <button
           onClick={() => setShowCheatSheet(true)}
-          className="flex items-center gap-1 px-2 py-1.5 hover:bg-primary-700/30 rounded-lg transition-colors text-zinc-400 hover:text-primary-300 text-xs ml-auto"
+          className="flex items-center gap-1 px-2 py-1.5 hover:bg-primary-700/30 rounded-lg transition-colors text-zinc-500 hover:text-primary-300 text-xs ml-auto"
           title="Snippet Shortcuts"
         >
-          <Keyboard className="w-3.5 h-3.5" />
-          <span className="hidden sm:inline">Shortcuts</span>
+          <Keyboard className="w-3.5 h-3.5 shrink-0" />
         </button>
       </div>
 
