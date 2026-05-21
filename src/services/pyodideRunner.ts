@@ -102,10 +102,15 @@ export async function runPython(
     });
 
     try {
+      (window as any)._onPyOutput = (text: string, type: 'output' | 'error') => {
+        onOutput(text, type);
+      };
+
       // Inject custom input function and configure buffer
       await py.runPythonAsync(`
 import builtins
 import sys
+import js
 
 if 'WaitingForInputException' not in globals():
     class WaitingForInputException(BaseException):
@@ -119,13 +124,31 @@ if 'StdinBuffer' not in globals():
 StdinBuffer.lines = ${JSON.stringify(stdinLines)}
 StdinBuffer.index = 0
 
+if 'CustomStdout' not in globals():
+    class CustomStdout:
+        def write(self, text):
+            js._onPyOutput(text, 'output')
+            return len(text)
+        def flush(self):
+            pass
+
+if 'CustomStderr' not in globals():
+    class CustomStderr:
+        def write(self, text):
+            js._onPyOutput(text, 'error')
+            return len(text)
+        def flush(self):
+            pass
+
+sys.stdout = CustomStdout()
+sys.stderr = CustomStderr()
+
 def custom_input(prompt=""):
     if prompt:
         print(prompt, end="", flush=True)
     if StdinBuffer.index < len(StdinBuffer.lines):
         val = StdinBuffer.lines[StdinBuffer.index]
         StdinBuffer.index += 1
-        print(val)
         return val
     else:
         raise WaitingForInputException("WAITING_FOR_INPUT")
@@ -134,7 +157,6 @@ def custom_readline(*args, **kwargs):
     if StdinBuffer.index < len(StdinBuffer.lines):
         val = StdinBuffer.lines[StdinBuffer.index]
         StdinBuffer.index += 1
-        print(val)
         return val + '\\n'
     else:
         raise WaitingForInputException("WAITING_FOR_INPUT")
@@ -165,6 +187,7 @@ sys.stdin.readline = custom_readline
       }
       onOutput(msg, 'error');
     } finally {
+      delete (window as any)._onPyOutput;
       // Reset stdin/input to default
       try {
         py.setStdin(null);
@@ -175,6 +198,8 @@ import builtins
 import sys
 if hasattr(builtins, '_original_input'):
     builtins.input = builtins._original_input
+sys.stdout = sys.__stdout__
+sys.stderr = sys.__stderr__
         `);
       } catch {/* ignore */}
     }
