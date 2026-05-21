@@ -21,13 +21,41 @@ function stripAnsi(str: string): string {
   return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
 }
 
-/** Parse GCC/Clang error output into structured CompileError[] */
-function parseGccErrors(stderr: string): CompileError[] {
-  if (!stderr) return [];
+/**
+ * Clean raw GCC stderr for display in the terminal:
+ * 1. Strip ANSI escape codes
+ * 2. Remove "source snippet" lines GCC adds for context (they show header
+ *    content instead of user code when #line directives are involved)
+ * 3. Adjust line numbers by subtracting the instrumentation header line count
+ */
+function cleanGccStderr(raw: string, headerLines: number): string {
+  const noAnsi = stripAnsi(raw);
+  return noAnsi
+    .split('\n')
+    .filter(line => {
+      // Remove "    N | code" lines (source context)
+      if (/^\s+\d+\s*\|/.test(line)) return false;
+      // Remove "    | ^~~" lines (error pointer)
+      if (/^\s+\|\s*[~^]/.test(line)) return false;
+      return true;
+    })
+    .map(line =>
+      // Rewrite "file:LINE:COL: …" adjusting for header offset
+      line.replace(/^([^:]+):(\d+):(\d+:)/g, (_m, file, lineStr, rest) => {
+        const adjusted = Math.max(1, parseInt(lineStr, 10) - headerLines);
+        return `${file}:${adjusted}:${rest}`;
+      })
+    )
+    .join('\n')
+    .trim();
+}
+
+/** Parse GCC/Clang error output into structured CompileError[] (already line-adjusted) */
+function parseGccErrors(cleanStderr: string): CompileError[] {
+  if (!cleanStderr) return [];
   const errors: CompileError[] = [];
-  for (const line of stderr.split('\n')) {
-    // Format: prog.cc:4:29: error: expected ';' before 'return'
-    // Or: <source>:4:28: error: expected ';' before 'return'
+  for (const line of cleanStderr.split('\n')) {
+    // Format: <source>:4:29: error: expected ';' before 'return'
     const m = line.match(/^[^:]+:(\d+):(\d+)?:\s*(error|warning|note):\s*(.+)$/);
     if (m) {
       const severity = m[3] === 'warning' ? 'warning' : 'error';
@@ -88,6 +116,37 @@ function processRunResult(
   };
 }
 
+/**
+ * Build a language-specific instrumentation header.
+ * Returns the header code and how many lines it occupies,
+ * so that GCC error line numbers can be adjusted back to user-code lines.
+ */
+function buildHeader(language: 'c' | 'cpp'): { code: string; lines: number } {
+  if (language === 'c') {
+    // Pure C header – no C++ at all, avoiding any #ifdef __cplusplus ambiguity
+    const lines = [
+      '#include <stdio.h>',
+      '#include <stdlib.h>',
+      '#define scanf(fmt, ...) ({ int _r = scanf(fmt, ##__VA_ARGS__); if (_r == EOF) exit(99); _r; })',
+      '#define getchar() ({ int _c = getchar(); if (_c == EOF) exit(99); _c; })',
+      '#define fgets(str, n, stream) ({ char* _r = fgets(str, n, stream); if (_r == NULL) exit(99); _r; })',
+      '#define gets(str) ({ char* _r = gets(str); if (_r == NULL) exit(99); _r; })',
+    ];
+    return { code: lines.join('\n') + '\n', lines: lines.length };
+  } else {
+    // Pure C++ header
+    const lines = [
+      '#include <iostream>',
+      '#include <exception>',
+      'namespace { struct _StdinInit { _StdinInit() {',
+      '  std::cin.exceptions(std::ios::failbit | std::ios::badbit);',
+      '  std::cout << std::unitbuf;',
+      '} } _stdin_init_obj; }',
+    ];
+    return { code: lines.join('\n') + '\n', lines: lines.length };
+  }
+}
+
 export async function compileAndRun(
   code: string,
   language: 'c' | 'cpp',
@@ -96,32 +155,14 @@ export async function compileAndRun(
   const options = language === 'c' ? '-O2 -Wall -std=c11' : '-O2 -Wall -std=c++17';
   const inputsUsed = stdin.split('\n').map(l => l.trim()).filter(l => l !== '');
 
-  // Instrument the code to exit cleanly/specifically on EOF
-  const header = `
-#ifdef __cplusplus
-#include <iostream>
-#include <exception>
-struct StdinInitializer {
-    StdinInitializer() {
-        std::cin.exceptions(std::ios::failbit | std::ios::badbit);
-        std::cout << std::unitbuf;
-    }
-} _stdin_init;
-#else
-#include <stdio.h>
-#include <stdlib.h>
-#define scanf(fmt, ...) ({ int _r = scanf(fmt, ##__VA_ARGS__); if (_r == EOF) exit(99); _r; })
-#define getchar() ({ int _c = getchar(); if (_c == EOF) exit(99); _c; })
-#define fgets(str, n, stream) ({ char* _r = fgets(str, n, stream); if (_r == NULL) exit(99); _r; })
-#define gets(str) ({ char* _r = gets(str); if (_r == NULL) exit(99); _r; })
-#endif
-#line 1
-`;
-  const instrumentedCode = header + code;
+  // Language-specific instrumentation header (no #ifdef __cplusplus)
+  const { code: headerCode, lines: headerLines } = buildHeader(language);
+  const instrumentedCode = headerCode + code;
 
   // ─── Primary: Godbolt API ────────────────────────────────────────────────
   try {
-    const compilerId = language === 'c' ? 'cg122' : 'g122';
+    // Use the most recent stable GCC version available on Godbolt
+    const compilerId = language === 'c' ? 'cg132' : 'g132';
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
 
@@ -163,17 +204,17 @@ struct StdinInitializer {
     let errors: CompileError[] = [];
 
     if (!didExecute) {
-      // Compilation failed, get errors from buildResult
-      const buildStderr = (data.buildResult?.stderr ?? []).map((l) => l.text).join('\n');
-      stderr = buildStderr;
-      compileError = buildStderr || 'Compilation failed';
-      const cleanStderr = stripAnsi(buildStderr);
-      errors = parseGccErrors(cleanStderr);
+      // Compilation failed – clean and adjust line numbers
+      const rawBuildStderr = (data.buildResult?.stderr ?? []).map((l) => l.text).join('\n');
+      const cleaned = cleanGccStderr(rawBuildStderr, headerLines);
+      stderr = cleaned;
+      compileError = cleaned || 'Compilation failed';
+      errors = parseGccErrors(cleaned);
     } else {
-      // Compilation succeeded, get runtime stderr if any
-      stderr = (data.stderr ?? []).map((l) => l.text).join('\n');
-      const cleanStderr = stripAnsi(stderr);
-      errors = parseGccErrors(cleanStderr);
+      // Compilation succeeded – clean runtime stderr if any
+      const rawRuntimeStderr = (data.stderr ?? []).map((l) => l.text).join('\n');
+      stderr = cleanGccStderr(rawRuntimeStderr, headerLines);
+      errors = parseGccErrors(stderr);
     }
 
     const status = didExecute ? data.code : -1;
@@ -197,12 +238,7 @@ struct StdinInitializer {
       body: JSON.stringify({
         language: pistonLang,
         version: '*',
-        files: [
-          {
-            name: filename,
-            content: instrumentedCode,
-          }
-        ],
+        files: [{ name: filename, content: instrumentedCode }],
         stdin,
       }),
     });
@@ -211,21 +247,16 @@ struct StdinInitializer {
     if (!res.ok) throw new Error(`Piston HTTP ${res.status}`);
 
     const data = await res.json() as {
-      run?: {
-        stdout?: string;
-        stderr?: string;
-        code?: number;
-        output?: string;
-      };
+      run?: { stdout?: string; stderr?: string; code?: number };
     };
 
     if (data.run) {
       const stdout = data.run.stdout ?? '';
-      const stderr = data.run.stderr ?? '';
+      const rawStderr = data.run.stderr ?? '';
+      const cleaned = cleanGccStderr(rawStderr, headerLines);
       const status = data.run.code ?? 0;
-      const errors = parseGccErrors(stderr);
-
-      return processRunResult(stdout, stderr, status, inputsUsed, errors);
+      const errors = parseGccErrors(cleaned);
+      return processRunResult(stdout, cleaned, status, inputsUsed, errors);
     }
     throw new Error('Piston invalid response format');
   } catch (pistonErr) {
@@ -263,13 +294,15 @@ struct StdinInitializer {
     };
 
     const stdout = data.program_output ?? '';
-    const compilerError = data.compiler_error ?? '';
-    const programError = data.program_error ?? '';
-    const stderr = [compilerError, programError].filter(Boolean).join('\n');
+    const rawCompilerError = data.compiler_error ?? '';
+    const rawProgramError = data.program_error ?? '';
+    const cleanedCompilerError = cleanGccStderr(rawCompilerError, headerLines);
+    const cleanedProgramError = stripAnsi(rawProgramError);
+    const stderr = [cleanedCompilerError, cleanedProgramError].filter(Boolean).join('\n');
     const status = parseInt(String(data.status ?? '0'), 10);
-    const errors = parseGccErrors(compilerError);
+    const errors = parseGccErrors(cleanedCompilerError);
 
-    return processRunResult(stdout, stderr, status, inputsUsed, errors, compilerError || undefined);
+    return processRunResult(stdout, stderr, status, inputsUsed, errors, cleanedCompilerError || undefined);
   } catch (wandboxErr) {
     console.warn('[cppRunner] Wandbox failed:', wandboxErr);
     throw new Error('COMPILER_UNAVAILABLE');
