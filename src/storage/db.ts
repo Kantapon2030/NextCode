@@ -12,8 +12,11 @@ export interface Project {
 
 export interface ProjectFile {
   project_id: string;
-  filename: string;
-  content: string;
+  path: string;
+  name: string;
+  parent_path: string;
+  type: 'file' | 'folder';
+  content?: string | ArrayBuffer | null;
   mime_type: string;
   drive_file_id?: string;
   is_dirty: boolean;
@@ -90,6 +93,59 @@ export class NextcodeDB extends Dexie {
       settings: '&key',
       terminal_history: '++id, project_id, timestamp, type',
       custom_snippets: '++id, trigger, language, createdAt',
+    });
+    // v3: migrate flat files & assets to tree files structure
+    this.version(3).stores({
+      projects: '&id, name, language, template, created_at, updated_at, drive_folder_id',
+      files: '&[project_id+path], project_id, path, name, parent_path, type, drive_file_id, is_dirty, updated_at, [project_id+parent_path]',
+      assets: '&[project_id+name], project_id, name, is_dirty',
+      snapshots: '++id, project_id, timestamp, type',
+      settings: '&key',
+      terminal_history: '++id, project_id, timestamp, type',
+      custom_snippets: '++id, trigger, language, createdAt',
+    }).upgrade(async tx => {
+      // 1. Migrate files
+      const oldFiles = await tx.table('files').toArray();
+      await tx.table('files').clear();
+      for (const f of oldFiles) {
+        const path = f.filename || f.path || '';
+        const parts = path.split('/').filter(Boolean);
+        const name = parts[parts.length - 1] || '';
+        const parent_path = parts.slice(0, parts.length - 1).join('/');
+        await tx.table('files').put({
+          project_id: f.project_id,
+          path,
+          name,
+          parent_path,
+          type: f.type || 'file',
+          content: f.content,
+          mime_type: f.mime_type || '',
+          drive_file_id: f.drive_file_id || '',
+          is_dirty: f.is_dirty || false,
+          updated_at: f.updated_at || Date.now(),
+        });
+      }
+
+      // 2. Migrate assets to files
+      const oldAssets = await tx.table('assets').toArray();
+      for (const a of oldAssets) {
+        const path = a.name || '';
+        const parts = path.split('/').filter(Boolean);
+        const name = parts[parts.length - 1] || '';
+        const parent_path = parts.slice(0, parts.length - 1).join('/');
+        await tx.table('files').put({
+          project_id: a.project_id,
+          path,
+          name,
+          parent_path,
+          type: 'file',
+          content: a.buffer,
+          mime_type: a.mime_type || '',
+          drive_file_id: a.drive_file_id || '',
+          is_dirty: a.is_dirty || false,
+          updated_at: Date.now(),
+        });
+      }
     });
   }
 }

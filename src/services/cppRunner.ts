@@ -2,6 +2,9 @@ export interface CompileResult {
   stdout: string;
   stderr: string;
   status: number;
+  exitCode: number;
+  inputsUsed: string[];
+  compileError?: string;
   errors: CompileError[];
 }
 
@@ -38,6 +41,7 @@ export async function compileAndRun(
   stdin = ''
 ): Promise<CompileResult> {
   const options = language === 'c' ? '-O2 -Wall -std=c11' : '-O2 -Wall -std=c++17';
+  const inputsUsed = stdin.split('\n').map(l => l.trim()).filter(l => l !== '');
 
   // ─── Primary: Wandbox ───────────────────────────────────────────────────
   try {
@@ -76,7 +80,15 @@ export async function compileAndRun(
     const status = parseInt(String(data.status ?? '0'), 10);
     const errors = parseGccErrors(compilerError);
 
-    return { stdout, stderr, status, errors };
+    return {
+      stdout,
+      stderr,
+      status,
+      exitCode: status,
+      inputsUsed,
+      compileError: compilerError || undefined,
+      errors
+    };
   } catch (primaryErr) {
     // timeout หรือ network error → fallback to Godbolt
   }
@@ -117,8 +129,17 @@ export async function compileAndRun(
     const stderr = (data.stderr ?? []).map((l) => l.text).join('\n');
     const status = data.execResult?.code ?? 1;
 
-    return { stdout, stderr, status, errors: parseGccErrors(stderr) };
+    return {
+      stdout,
+      stderr,
+      status,
+      exitCode: status,
+      inputsUsed,
+      compileError: stderr || undefined,
+      errors: parseGccErrors(stderr)
+    };
   } catch {
     throw new Error('COMPILER_UNAVAILABLE');
   }
 }
+

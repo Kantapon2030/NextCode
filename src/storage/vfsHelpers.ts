@@ -1,35 +1,317 @@
-import { db, ProjectFile, ProjectAsset } from './db';
+import { db, ProjectFile } from './db';
+import { VFSNode, VFSState } from '../types';
 
-export interface VFS {
-  files: Record<string, { content: string; mimeType: string }>;
-  assets: Record<string, { buffer: ArrayBuffer; mimeType: string }>;
+export function buildVFSFromFiles(files: ProjectFile[]): VFSState {
+  const tree: Record<string, VFSNode> = {};
+  const flatIndex: Record<string, VFSNode> = {};
+
+  // First, index all nodes in flatIndex so we can reference them
+  for (const f of files) {
+    const node: VFSNode = {
+      type: f.type,
+      name: f.name,
+      path: f.path,
+      mimeType: f.mime_type,
+      driveFileId: f.drive_file_id,
+      isDirty: f.is_dirty,
+    };
+    if (f.type === 'file') {
+      node.content = f.content || '';
+    } else {
+      node.children = {};
+      node.isExpanded = false;
+    }
+    flatIndex[f.path] = node;
+  }
+
+  // Build the hierarchical tree structure
+  for (const path in flatIndex) {
+    const node = flatIndex[path];
+    const parts = path.split('/').filter(Boolean);
+    if (parts.length === 1) {
+      tree[parts[0]] = node;
+    } else {
+      let currentChildren = tree;
+      let currentPath = '';
+      for (let i = 0; i < parts.length - 1; i++) {
+        const part = parts[i];
+        currentPath = currentPath ? `${currentPath}/${part}` : part;
+        if (!currentChildren[part]) {
+          // Parent doesn't exist, create implicit folder
+          const folderNode: VFSNode = {
+            type: 'folder',
+            name: part,
+            path: currentPath,
+            children: {},
+            isExpanded: false,
+          };
+          currentChildren[part] = folderNode;
+          flatIndex[currentPath] = folderNode;
+        }
+        
+        if (!currentChildren[part].children) {
+          currentChildren[part].children = {};
+        }
+        currentChildren = currentChildren[part].children!;
+      }
+      
+      const lastPart = parts[parts.length - 1];
+      currentChildren[lastPart] = node;
+    }
+  }
+
+  const { files: filesMap, assets: assetsMap } = buildCompatibilityMaps(tree);
+  return { tree, flatIndex, files: filesMap, assets: assetsMap };
 }
 
-export async function loadVFS(projectId: string): Promise<VFS> {
+export function buildCompatibilityMaps(tree: Record<string, VFSNode>) {
+  const files: Record<string, { content: string; mimeType: string }> = {};
+  const assets: Record<string, { buffer: ArrayBuffer; mimeType: string }> = {};
+
+  function traverse(nodes: Record<string, VFSNode>) {
+    for (const key in nodes) {
+      const node = nodes[key];
+      if (node.type === 'file') {
+        const isText = isTextFile(node.name);
+        if (isText) {
+          files[node.path] = { content: (node.content as string) || '', mimeType: node.mimeType || '' };
+        } else {
+          assets[node.path] = { buffer: (node.content as ArrayBuffer) || new ArrayBuffer(0), mimeType: node.mimeType || '' };
+        }
+      } else if (node.type === 'folder' && node.children) {
+        traverse(node.children);
+      }
+    }
+  }
+  traverse(tree);
+  return { files, assets };
+}
+
+export function buildFlatIndex(tree: Record<string, VFSNode>): Record<string, VFSNode> {
+  const flatIndex: Record<string, VFSNode> = {};
+  function traverse(nodes: Record<string, VFSNode>) {
+    for (const key in nodes) {
+      const node = nodes[key];
+      flatIndex[node.path] = node;
+      if (node.type === 'folder' && node.children) {
+        traverse(node.children);
+      }
+    }
+  }
+  traverse(tree);
+  return flatIndex;
+}
+
+export function cloneNode(node: VFSNode): VFSNode {
+  const cloned: VFSNode = {
+    ...node,
+  };
+  if (node.children) {
+    cloned.children = {};
+    for (const key in node.children) {
+      cloned.children[key] = cloneNode(node.children[key]);
+    }
+  }
+  return cloned;
+}
+
+export function cloneTree(tree: Record<string, VFSNode>): Record<string, VFSNode> {
+  const cloned: Record<string, VFSNode> = {};
+  for (const key in tree) {
+    cloned[key] = cloneNode(tree[key]);
+  }
+  return cloned;
+}
+
+export function setNodeAtPath(
+  tree: Record<string, VFSNode>,
+  path: string,
+  node: VFSNode
+): Record<string, VFSNode> {
+  const newTree = cloneTree(tree);
+  const parts = path.split('/').filter(Boolean);
+  if (parts.length === 0) return newTree;
+
+  let currentChildren = newTree;
+  let currentPath = '';
+
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    currentPath = currentPath ? `${currentPath}/${part}` : part;
+    if (!currentChildren[part]) {
+      currentChildren[part] = {
+        type: 'folder',
+        name: part,
+        path: currentPath,
+        children: {},
+        isExpanded: false,
+      };
+    }
+    if (!currentChildren[part].children) {
+      currentChildren[part].children = {};
+    }
+    currentChildren = currentChildren[part].children!;
+  }
+
+  const lastPart = parts[parts.length - 1];
+  currentChildren[lastPart] = node;
+  return newTree;
+}
+
+export function setFileAtPath(
+  tree: Record<string, VFSNode>,
+  path: string,
+  updates: Partial<VFSNode>
+): Record<string, VFSNode> {
+  const parts = path.split('/').filter(Boolean);
+  const name = parts[parts.length - 1] || '';
+  const node: VFSNode = {
+    type: 'file',
+    name,
+    path,
+    ...updates,
+  };
+  return setNodeAtPath(tree, path, node);
+}
+
+export function setFolderAtPath(
+  tree: Record<string, VFSNode>,
+  path: string,
+  updates: Partial<VFSNode> = {}
+): Record<string, VFSNode> {
+  const parts = path.split('/').filter(Boolean);
+  const name = parts[parts.length - 1] || '';
+  const node: VFSNode = {
+    type: 'folder',
+    name,
+    path,
+    children: {},
+    isExpanded: false,
+    ...updates,
+  };
+  return setNodeAtPath(tree, path, node);
+}
+
+export function deleteAtPath(
+  tree: Record<string, VFSNode>,
+  path: string
+): Record<string, VFSNode> {
+  const newTree = cloneTree(tree);
+  const parts = path.split('/').filter(Boolean);
+  if (parts.length === 0) return newTree;
+
+  let currentChildren = newTree;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    if (!currentChildren[part] || !currentChildren[part].children) {
+      return newTree;
+    }
+    currentChildren = currentChildren[part].children!;
+  }
+
+  const lastPart = parts[parts.length - 1];
+  delete currentChildren[lastPart];
+  return newTree;
+}
+
+export function moveNode(
+  tree: Record<string, VFSNode>,
+  oldPath: string,
+  newPath: string
+): Record<string, VFSNode> {
+  const parts = oldPath.split('/').filter(Boolean);
+  if (parts.length === 0) return tree;
+
+  let currentChildren = tree;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    if (!currentChildren[part] || !currentChildren[part].children) return tree;
+    currentChildren = currentChildren[part].children;
+  }
+  const lastPart = parts[parts.length - 1];
+  const originalNode = currentChildren[lastPart];
+  if (!originalNode) return tree;
+
+  const newParts = newPath.split('/').filter(Boolean);
+  const newName = newParts[newParts.length - 1];
+
+  function updatePathsRecursively(node: VFSNode, newParentPath: string): VFSNode {
+    const nodePath = newParentPath ? `${newParentPath}/${node.name}` : node.name;
+    const updated: VFSNode = {
+      ...node,
+      path: nodePath,
+    };
+    if (node.children) {
+      updated.children = {};
+      for (const key in node.children) {
+        updated.children[key] = updatePathsRecursively(node.children[key], nodePath);
+      }
+    }
+    return updated;
+  }
+
+  const copiedNode = cloneNode(originalNode);
+  copiedNode.name = newName;
+  const parentOfNewPath = newParts.slice(0, newParts.length - 1).join('/');
+  const nodeWithUpdatedPaths = updatePathsRecursively(copiedNode, parentOfNewPath);
+
+  let tempTree = deleteAtPath(tree, oldPath);
+  tempTree = setNodeAtPath(tempTree, newPath, nodeWithUpdatedPaths);
+  return tempTree;
+}
+
+export async function loadVFS(projectId: string): Promise<VFSState> {
   const files = await db.files.where('project_id').equals(projectId).toArray();
-  const assets = await db.assets.where('project_id').equals(projectId).toArray();
-  const vfs: VFS = { files: {}, assets: {} };
-  for (const f of files) {
-    vfs.files[f.filename] = { content: f.content, mimeType: f.mime_type };
-  }
-  for (const a of assets) {
-    vfs.assets[a.name] = { buffer: a.buffer, mimeType: a.mime_type };
-  }
-  return vfs;
+  return buildVFSFromFiles(files);
 }
 
 export async function saveVFSFile(
   projectId: string,
-  filename: string,
-  content: string,
-  mimeType: string
+  path: string,
+  content: string | ArrayBuffer,
+  mimeType: string,
+  driveFileId?: string,
+  isDirty: boolean = true
 ): Promise<void> {
+  const parts = path.split('/').filter(Boolean);
+  const name = parts[parts.length - 1] || '';
+  const parent_path = parts.slice(0, parts.length - 1).join('/');
+
   const record: ProjectFile = {
     project_id: projectId,
-    filename,
+    path,
+    name,
+    parent_path,
+    type: 'file',
     content,
     mime_type: mimeType,
-    is_dirty: true,
+    drive_file_id: driveFileId || '',
+    is_dirty: isDirty,
+    updated_at: Date.now(),
+  };
+  await db.files.put(record);
+  await db.projects.update(projectId, { updated_at: Date.now() });
+}
+
+export async function saveVFSFolder(
+  projectId: string,
+  path: string,
+  driveFolderId?: string,
+  isDirty: boolean = true
+): Promise<void> {
+  const parts = path.split('/').filter(Boolean);
+  const name = parts[parts.length - 1] || '';
+  const parent_path = parts.slice(0, parts.length - 1).join('/');
+
+  const record: ProjectFile = {
+    project_id: projectId,
+    path,
+    name,
+    parent_path,
+    type: 'folder',
+    mime_type: '',
+    drive_file_id: driveFolderId || '',
+    is_dirty: isDirty,
     updated_at: Date.now(),
   };
   await db.files.put(record);
@@ -38,26 +320,74 @@ export async function saveVFSFile(
 
 export async function saveVFSAsset(
   projectId: string,
-  name: string,
+  path: string,
   buffer: ArrayBuffer,
-  mimeType: string
+  mimeType: string,
+  driveFileId?: string,
+  isDirty: boolean = true
 ): Promise<void> {
-  const record: ProjectAsset = {
-    project_id: projectId,
-    name,
-    buffer,
-    mime_type: mimeType,
-    size: buffer.byteLength,
-    is_dirty: true,
-  };
-  await db.assets.put(record);
+  await saveVFSFile(projectId, path, buffer, mimeType, driveFileId, isDirty);
 }
 
 export async function deleteVFSFile(
   projectId: string,
-  filename: string
+  path: string
 ): Promise<void> {
-  await db.files.delete([projectId, filename]);
+  await db.files.delete([projectId, path]);
+}
+
+export async function deleteVFSFolder(
+  projectId: string,
+  folderPath: string
+): Promise<void> {
+  await db.files.delete([projectId, folderPath]);
+  const allFiles = await db.files.where('project_id').equals(projectId).toArray();
+  const prefix = folderPath.endsWith('/') ? folderPath : `${folderPath}/`;
+  const toDelete = allFiles.filter(f => f.path === folderPath || f.path.startsWith(prefix));
+  for (const f of toDelete) {
+    await db.files.delete([projectId, f.path]);
+  }
+}
+
+export async function renameNodeInDB(
+  projectId: string,
+  oldPath: string,
+  newPath: string
+): Promise<void> {
+  const allFiles = await db.files.where('project_id').equals(projectId).toArray();
+  const prefix = oldPath.endsWith('/') ? oldPath : `${oldPath}/`;
+  
+  for (const f of allFiles) {
+    if (f.path === oldPath) {
+      await db.files.delete([projectId, oldPath]);
+      const parts = newPath.split('/').filter(Boolean);
+      const name = parts[parts.length - 1] || '';
+      const parent_path = parts.slice(0, parts.length - 1).join('/');
+      await db.files.put({
+        ...f,
+        path: newPath,
+        name,
+        parent_path,
+        is_dirty: true,
+        updated_at: Date.now(),
+      });
+    } else if (f.path.startsWith(prefix)) {
+      await db.files.delete([projectId, f.path]);
+      const subPath = f.path.substring(oldPath.length);
+      const updatedPath = newPath + subPath;
+      const parts = updatedPath.split('/').filter(Boolean);
+      const name = parts[parts.length - 1] || '';
+      const parent_path = parts.slice(0, parts.length - 1).join('/');
+      await db.files.put({
+        ...f,
+        path: updatedPath,
+        name,
+        parent_path,
+        is_dirty: true,
+        updated_at: Date.now(),
+      });
+    }
+  }
 }
 
 export function getMimeType(filename: string): string {

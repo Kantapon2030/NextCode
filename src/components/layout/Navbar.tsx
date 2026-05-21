@@ -45,12 +45,11 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
   async function handleDownloadZip() {
     if (!currentProject) return;
     const files = await db.files.where('project_id').equals(currentProject.id).toArray();
-    const assets = await db.assets.where('project_id').equals(currentProject.id).toArray();
     const zip = new JSZip();
-    for (const f of files) zip.file(f.filename, f.content);
-    if (assets.length > 0) {
-      const assetFolder = zip.folder('assets')!;
-      for (const a of assets) assetFolder.file(a.name, a.buffer);
+    for (const f of files) {
+      if (f.type === 'file' && f.content !== undefined && f.content !== null) {
+        zip.file(f.path, f.content);
+      }
     }
     zip.file(
       'README.md',
@@ -65,11 +64,17 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
   function handleDownloadCurrentFile() {
     const { activeTab } = useAppStore.getState();
     if (!activeTab) return;
-    const content = vfs.files[activeTab]?.content ?? '';
-    const blob = new Blob([content], { type: 'text/plain' });
+    const node = vfs.flatIndex[activeTab];
+    if (!node || node.type !== 'file') return;
+    const content = node.content ?? '';
+    const mime = node.mimeType || 'text/plain';
+    const blob = new Blob([content], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = activeTab; a.click();
+    a.href = url;
+    const filename = activeTab.split('/').pop() || activeTab;
+    a.download = filename;
+    a.click();
     URL.revokeObjectURL(url);
     setShowExportMenu(false);
   }

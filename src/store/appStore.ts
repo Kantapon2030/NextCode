@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { VFS } from '../storage/vfsHelpers';
+import { VFSState } from '../types';
+import { setFileAtPath, setFolderAtPath, deleteAtPath, moveNode, buildFlatIndex, buildCompatibilityMaps } from '../storage/vfsHelpers';
 
 export interface ConsoleEntry {
   id: string;
@@ -51,7 +52,7 @@ interface AppState {
   userMode: UserMode;
   projects: Project[];
   currentProject: Project | null;
-  vfs: VFS;
+  vfs: VFSState;
   openTabs: string[];
   activeTab: string | null;
   saveStatus: SaveStatus;
@@ -79,8 +80,12 @@ interface AppState {
   removeProject: (id: string) => void;
   updateProject: (id: string, updates: Partial<Project>) => void;
   setCurrentProject: (project: Project | null) => void;
-  setVFS: (vfs: VFS) => void;
-  updateVFSFile: (filename: string, content: string, mimeType: string) => void;
+  setVFS: (vfs: VFSState) => void;
+  updateVFSFile: (filename: string, content: string | ArrayBuffer, mimeType: string, isDirty?: boolean) => void;
+  deleteVFSPath: (path: string) => void;
+  createVFSFolder: (path: string) => void;
+  renameVFSPath: (oldPath: string, newPath: string) => void;
+  toggleFolderExpanded: (path: string) => void;
   openTab: (filename: string) => void;
   closeTab: (filename: string) => void;
   setActiveTab: (filename: string | null) => void;
@@ -111,7 +116,7 @@ export const useAppStore = create<AppState>((set) => ({
   userMode: 'beginner',
   projects: [],
   currentProject: null,
-  vfs: { files: {}, assets: {} },
+  vfs: { tree: {}, flatIndex: {}, files: {}, assets: {} },
   openTabs: [],
   activeTab: null,
   saveStatus: 'saved',
@@ -145,13 +150,55 @@ export const useAppStore = create<AppState>((set) => ({
     })),
   setCurrentProject: (currentProject) => set({ currentProject }),
   setVFS: (vfs) => set({ vfs }),
-  updateVFSFile: (filename, content, mimeType) =>
-    set((s) => ({
-      vfs: {
-        ...s.vfs,
-        files: { ...s.vfs.files, [filename]: { content, mimeType } },
-      },
-    })),
+  updateVFSFile: (path, content, mimeType, isDirty) =>
+    set((s) => {
+      const newTree = setFileAtPath(s.vfs.tree, path, { content, mimeType, isDirty: isDirty ?? true });
+      const newFlatIndex = buildFlatIndex(newTree);
+      const { files, assets } = buildCompatibilityMaps(newTree);
+      return { vfs: { tree: newTree, flatIndex: newFlatIndex, files, assets } };
+    }),
+  deleteVFSPath: (path) =>
+    set((s) => {
+      const newTree = deleteAtPath(s.vfs.tree, path);
+      const newFlatIndex = buildFlatIndex(newTree);
+      const { files, assets } = buildCompatibilityMaps(newTree);
+      const prefix = path.endsWith('/') ? path : `${path}/`;
+      const openTabs = s.openTabs.filter(t => t !== path && !t.startsWith(prefix));
+      const activeTab = openTabs.includes(s.activeTab || '') ? s.activeTab : (openTabs[openTabs.length - 1] ?? null);
+      return { vfs: { tree: newTree, flatIndex: newFlatIndex, files, assets }, openTabs, activeTab };
+    }),
+  createVFSFolder: (path) =>
+    set((s) => {
+      const newTree = setFolderAtPath(s.vfs.tree, path, { isExpanded: false, isDirty: true });
+      const newFlatIndex = buildFlatIndex(newTree);
+      const { files, assets } = buildCompatibilityMaps(newTree);
+      return { vfs: { tree: newTree, flatIndex: newFlatIndex, files, assets } };
+    }),
+  renameVFSPath: (oldPath, newPath) =>
+    set((s) => {
+      const newTree = moveNode(s.vfs.tree, oldPath, newPath);
+      const newFlatIndex = buildFlatIndex(newTree);
+      const { files, assets } = buildCompatibilityMaps(newTree);
+      const openTabs = s.openTabs.map(t => {
+        if (t === oldPath) return newPath;
+        if (t.startsWith(oldPath + '/')) {
+          return newPath + t.substring(oldPath.length);
+        }
+        return t;
+      });
+      const activeTab = s.activeTab === oldPath ? newPath : (s.activeTab?.startsWith(oldPath + '/') ? newPath + s.activeTab.substring(oldPath.length) : s.activeTab);
+      return { vfs: { tree: newTree, flatIndex: newFlatIndex, files, assets }, openTabs, activeTab };
+    }),
+  toggleFolderExpanded: (path) =>
+    set((s) => {
+      const node = s.vfs.flatIndex[path];
+      if (!node || node.type !== 'folder') return {};
+      const isExpanded = !node.isExpanded;
+      const newTree = setFolderAtPath(s.vfs.tree, path, { isExpanded });
+      const newFlatIndex = buildFlatIndex(newTree);
+      const { files, assets } = buildCompatibilityMaps(newTree);
+      return { vfs: { tree: newTree, flatIndex: newFlatIndex, files, assets } };
+    }),
   openTab: (filename) =>
     set((s) => {
       if (s.openTabs.includes(filename)) return { activeTab: filename };
@@ -199,7 +246,7 @@ export const useAppStore = create<AppState>((set) => ({
       currentProject: null,
       openTabs: [],
       activeTab: null,
-      vfs: { files: {}, assets: {} },
+      vfs: { tree: {}, flatIndex: {}, files: {}, assets: {} },
       aiResponse: null,
       consoleLogs: [],
       consoleErrors: [],

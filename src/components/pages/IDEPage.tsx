@@ -15,7 +15,8 @@ import { StatusBar } from '../layout/StatusBar';
 import { TabBar } from '../editor/TabBar';
 import { MonacoWrapper } from '../editor/MonacoWrapper';
 import { FileTree } from '../sidebar/FileTree';
-import { PreviewPane, buildPreview } from '../output/PreviewPane';
+import { PreviewPane } from '../output/PreviewPane';
+import { buildPreview } from '../../utils/blobHelpers';
 import { TerminalPane } from '../output/TerminalPane';
 import { AIPanel } from '../ai/AIPanel';
 import { CommandPalette } from '../modals/CommandPalette';
@@ -186,7 +187,7 @@ export default function IDEPage() {
 
   async function handleDeleteAsset(name: string) {
     if (!projectId) return;
-    await db.assets.delete([projectId, name]);
+    await deleteVFSFile(projectId, name);
     const newVFS = await loadVFS(projectId);
     setVFS(newVFS);
   }

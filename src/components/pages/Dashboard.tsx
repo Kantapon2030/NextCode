@@ -116,11 +116,12 @@ export default function Dashboard() {
     const proj = projects.find((p) => p.id === id);
     if (!proj) return;
     const files = await db.files.where('project_id').equals(id).toArray();
-    const assets = await db.assets.where('project_id').equals(id).toArray();
     const zip = new JSZip();
-    for (const f of files) zip.file(f.filename, f.content);
-    const assetFolder = zip.folder('assets')!;
-    for (const a of assets) assetFolder.file(a.name, a.buffer);
+    for (const f of files) {
+      if (f.type === 'file' && f.content !== undefined && f.content !== null) {
+        zip.file(f.path, f.content);
+      }
+    }
     zip.file(
       'README.md',
       `# ${proj.name}\n\nสร้างด้วย Nextcode IDE\nวันที่: ${new Date().toLocaleDateString('th-TH')}\nภาษา: ${proj.language.toUpperCase()}\n`
@@ -176,19 +177,12 @@ export default function Dashboard() {
         setImportProgress(`กำลังนำเข้า ${count + 1}/${imported.length}: ${path}`);
         const buf = await file.arrayBuffer();
 
-        if (isImage(file.name)) {
-          // บันทึกเป็น asset (รูปภาพ)
-          await db.assets.put({
-            project_id: projectId,
-            name: path,                    // เก็บ path เต็ม เช่น "picture/photo.jpg"
-            buffer: buf,
-            mime_type: file.type || getMimeType(file.name),
-            size: buf.byteLength,
-            is_dirty: false,
-          });
-        } else if (isTextFile(file.name)) {
+        if (isTextFile(file.name)) {
           const text = new TextDecoder('utf-8', { fatal: false }).decode(buf);
-          await saveVFSFile(projectId, path, text, getMimeType(file.name));
+          await saveVFSFile(projectId, path, text, getMimeType(file.name), undefined, false);
+        } else {
+          // บันทึกเป็น asset (รูปภาพ หรือไฟล์ binary อื่นๆ)
+          await saveVFSAsset(projectId, path, buf, file.type || getMimeType(file.name), undefined, false);
         }
         count++;
       }
@@ -238,14 +232,10 @@ export default function Dashboard() {
       for (const { path, file } of imported) {
         setImportProgress(`${count + 1}/${imported.length}: ${path}`);
         const buf = await file.arrayBuffer();
-        if (isImage(file.name)) {
-          await db.assets.put({
-            project_id: projectId, name: path, buffer: buf,
-            mime_type: file.type || getMimeType(file.name),
-            size: buf.byteLength, is_dirty: false,
-          });
-        } else if (isTextFile(file.name)) {
-          await saveVFSFile(projectId, path, new TextDecoder().decode(buf), getMimeType(file.name));
+        if (isTextFile(file.name)) {
+          await saveVFSFile(projectId, path, new TextDecoder('utf-8', { fatal: false }).decode(buf), getMimeType(file.name), undefined, false);
+        } else {
+          await saveVFSAsset(projectId, path, buf, file.type || getMimeType(file.name), undefined, false);
         }
         count++;
       }
