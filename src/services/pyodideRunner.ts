@@ -86,40 +86,96 @@ export async function runPython(
     // Clone the stdin array so we can pop from it
     const stdinQueue = [...stdinLines];
 
-    // Set up synchronous stdin via Pyodide's setStdin
-    // Each call to read() returns the next line + newline, or '' for EOF
     py.setStdout({ batched: (msg: string) => onOutput(msg, 'output') });
     py.setStderr({ batched: (msg: string) => onOutput(msg, 'error') });
 
-    // setStdin with a sync function — returns next line or '' (EOF)
+    // Set fallback stdin callback
     py.setStdin({
       stdin: (): string => {
         if (stdinQueue.length > 0) {
           const line = stdinQueue.shift()!;
-          // Echo the input to output so user sees what was typed
           onOutput(line, 'output');
           return line + '\n';
         }
-        // EOF — return empty string
         return '';
       },
     });
 
     try {
+      // Inject custom input function and configure buffer
+      await py.runPythonAsync(`
+import builtins
+import sys
+
+if 'WaitingForInputException' not in globals():
+    class WaitingForInputException(BaseException):
+        pass
+
+if 'StdinBuffer' not in globals():
+    class StdinBuffer:
+        lines = []
+        index = 0
+
+StdinBuffer.lines = ${JSON.stringify(stdinLines)}
+StdinBuffer.index = 0
+
+def custom_input(prompt=""):
+    if prompt:
+        print(prompt, end="", flush=True)
+    if StdinBuffer.index < len(StdinBuffer.lines):
+        val = StdinBuffer.lines[StdinBuffer.index]
+        StdinBuffer.index += 1
+        print(val)
+        return val
+    else:
+        raise WaitingForInputException("WAITING_FOR_INPUT")
+
+def custom_readline(*args, **kwargs):
+    if StdinBuffer.index < len(StdinBuffer.lines):
+        val = StdinBuffer.lines[StdinBuffer.index]
+        StdinBuffer.index += 1
+        print(val)
+        return val + '\n'
+    else:
+        raise WaitingForInputException("WAITING_FOR_INPUT")
+
+builtins.input = custom_input
+try:
+    if isinstance(__builtins__, dict):
+        __builtins__['input'] = custom_input
+    else:
+        __builtins__.input = custom_input
+except NameError:
+    pass
+
+sys.stdin.readline = custom_readline
+      `);
+
       onStatus('กำลังโหลด packages...');
       await py.loadPackagesFromImports(code);
       onStatus('');
       await py.runPythonAsync(code);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('EOFError: EOF when reading a line')) {
+      if (
+        msg.includes('WaitingForInputException: WAITING_FOR_INPUT') ||
+        msg.includes('EOFError: EOF when reading a line')
+      ) {
         throw new Error('WAITING_FOR_INPUT');
       }
       onOutput(msg, 'error');
     } finally {
-      // Reset stdin to default
+      // Reset stdin/input to default
       try {
         py.setStdin(null);
+      } catch {/* ignore */}
+      try {
+        await py.runPythonAsync(`
+import builtins
+import sys
+if hasattr(builtins, '_original_input'):
+    builtins.input = builtins._original_input
+        `);
       } catch {/* ignore */}
     }
   });
