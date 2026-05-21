@@ -100,6 +100,7 @@ interface AppState {
   addConsoleEntry: (entry: ConsoleEntry) => void;
   clearConsole: () => void;
   addTerminalEntry: (entry: TerminalEntry) => void;
+  setTerminalOutput: (output: TerminalEntry[]) => void;
   clearTerminal: () => void;
   setPreviewWidth: (w: PreviewWidth) => void;
   setCommandPaletteOpen: (open: boolean) => void;
@@ -247,6 +248,7 @@ export const useAppStore = create<AppState>((set) => ({
   clearConsole: () => set({ consoleLogs: [], consoleErrors: [] }),
   addTerminalEntry: (entry) =>
     set((s) => ({ terminalOutput: [...s.terminalOutput.slice(-500), entry] })),
+  setTerminalOutput: (terminalOutput) => set({ terminalOutput }),
   clearTerminal: () => set({ terminalOutput: [] }),
   setPreviewWidth: (previewWidth) => set({ previewWidth }),
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),

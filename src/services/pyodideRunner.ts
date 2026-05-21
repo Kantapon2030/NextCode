@@ -89,6 +89,9 @@ export async function runPython(
     await py.runPythonAsync(code);
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('EOFError: EOF when reading a line')) {
+      throw new Error('WAITING_FOR_INPUT');
+    }
     onOutput(msg, 'error');
   } finally {
     // Reset stdin to default

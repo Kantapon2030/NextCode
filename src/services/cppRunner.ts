@@ -6,6 +6,7 @@ export interface CompileResult {
   inputsUsed: string[];
   compileError?: string;
   errors: CompileError[];
+  isWaiting?: boolean;
 }
 
 export interface CompileError {
@@ -15,12 +16,18 @@ export interface CompileError {
   severity: 'error' | 'warning';
 }
 
+/** Strip ANSI escape codes from string */
+function stripAnsi(str: string): string {
+  return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+}
+
 /** Parse GCC/Clang error output into structured CompileError[] */
 function parseGccErrors(stderr: string): CompileError[] {
   if (!stderr) return [];
   const errors: CompileError[] = [];
   for (const line of stderr.split('\n')) {
     // Format: prog.cc:4:29: error: expected ';' before 'return'
+    // Or: <source>:4:28: error: expected ';' before 'return'
     const m = line.match(/^[^:]+:(\d+):(\d+)?:\s*(error|warning|note):\s*(.+)$/);
     if (m) {
       const severity = m[3] === 'warning' ? 'warning' : 'error';
@@ -43,7 +50,124 @@ export async function compileAndRun(
   const options = language === 'c' ? '-O2 -Wall -std=c11' : '-O2 -Wall -std=c++17';
   const inputsUsed = stdin.split('\n').map(l => l.trim()).filter(l => l !== '');
 
-  // ─── Primary: Piston API ────────────────────────────────────────────────
+  // Instrument the code to exit cleanly/specifically on EOF
+  const header = `
+#ifdef __cplusplus
+#include <iostream>
+#include <exception>
+struct StdinInitializer {
+    StdinInitializer() {
+        std::cin.exceptions(std::ios::failbit | std::ios::badbit);
+        std::cout << std::unitbuf;
+    }
+} _stdin_init;
+#else
+#include <stdio.h>
+#include <stdlib.h>
+#define scanf(fmt, ...) ({ int _r = scanf(fmt, ##__VA_ARGS__); if (_r == EOF) exit(99); _r; })
+#define getchar() ({ int _c = getchar(); if (_c == EOF) exit(99); _c; })
+#define fgets(str, n, stream) ({ char* _r = fgets(str, n, stream); if (_r == NULL) exit(99); _r; })
+#define gets(str) ({ char* _r = gets(str); if (_r == NULL) exit(99); _r; })
+#endif
+#line 1
+`;
+  const instrumentedCode = header + code;
+
+  // ─── Primary: Godbolt API ────────────────────────────────────────────────
+  try {
+    const compilerId = language === 'c' ? 'cg122' : 'g122';
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    const res = await fetch(`https://godbolt.org/api/compiler/${compilerId}/compile`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({
+        source: instrumentedCode,
+        options: {
+          userArguments: options,
+          executeParameters: { stdin, args: [] },
+          compilerOptions: { executorRequest: true },
+          filters: { execute: true },
+        },
+        lang: language === 'c' ? 'c' : 'c++',
+        allowStoreCodeDebug: false,
+      }),
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) throw new Error(`Godbolt HTTP ${res.status}`);
+
+    const data = await res.json() as {
+      code: number;
+      didExecute: boolean;
+      stdout?: { text: string }[];
+      stderr?: { text: string }[];
+      buildResult?: {
+        code: number;
+        stderr?: { text: string }[];
+      };
+    };
+
+    const didExecute = !!data.didExecute;
+    const stdout = (data.stdout ?? []).map((l) => l.text).join('\n');
+    let stderr = '';
+    let compileError: string | undefined;
+    let errors: CompileError[] = [];
+
+    if (!didExecute) {
+      // Compilation failed, get errors from buildResult
+      const buildStderr = (data.buildResult?.stderr ?? []).map((l) => l.text).join('\n');
+      stderr = buildStderr;
+      compileError = buildStderr || 'Compilation failed';
+      const cleanStderr = stripAnsi(buildStderr);
+      errors = parseGccErrors(cleanStderr);
+    } else {
+      // Compilation succeeded, get runtime stderr if any
+      stderr = (data.stderr ?? []).map((l) => l.text).join('\n');
+      const cleanStderr = stripAnsi(stderr);
+      errors = parseGccErrors(cleanStderr);
+    }
+
+    let status = didExecute ? data.code : -1;
+    let isWaiting = false;
+
+    // Detect EOF failure in C++ (139/SIGSEGV caused by std::ios_base::failure crash)
+    // or C (exited with exit code 99)
+    if (
+      status === 99 ||
+      status === 139 ||
+      stderr.includes('std::__ios_failure') ||
+      stderr.includes('basic_ios::clear') ||
+      stderr.includes('iostream error')
+    ) {
+      isWaiting = true;
+      status = 0; // treat as clean EOF wait
+      // Strip crash traces from stderr
+      stderr = stderr.split('\n').filter(line => 
+        !line.includes('std::__ios_failure') && 
+        !line.includes('basic_ios::clear') && 
+        !line.includes('iostream error') &&
+        !line.includes('Program terminated with signal')
+      ).join('\n').trim();
+    }
+
+    return {
+      stdout,
+      stderr,
+      status,
+      exitCode: status,
+      inputsUsed,
+      compileError,
+      errors,
+      isWaiting
+    };
+  } catch (primaryErr) {
+    console.warn('[cppRunner] Godbolt failed, trying Piston as fallback:', primaryErr);
+  }
+
+  // ─── Fallback 1: Piston API ────────────────────────────────────────────────
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
@@ -97,11 +221,11 @@ export async function compileAndRun(
       };
     }
     throw new Error('Piston invalid response format');
-  } catch (primaryErr) {
-    console.warn('[cppRunner] Piston failed, trying Wandbox:', primaryErr);
+  } catch (pistonErr) {
+    console.warn('[cppRunner] Piston failed, trying Wandbox as fallback:', pistonErr);
   }
 
-  // ─── Fallback 1: Wandbox ─────────────────────────────────────────────────
+  // ─── Fallback 2: Wandbox ─────────────────────────────────────────────────
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
@@ -122,8 +246,6 @@ export async function compileAndRun(
     });
     clearTimeout(timeout);
 
-    // Treat 5xx as primary failure → fall through to Godbolt
-    if (res.status >= 500) throw new Error(`Wandbox server error ${res.status}`);
     if (!res.ok) throw new Error(`Wandbox HTTP ${res.status}`);
 
     const data = await res.json() as {
@@ -150,56 +272,7 @@ export async function compileAndRun(
       errors
     };
   } catch (wandboxErr) {
-    console.warn('[cppRunner] Wandbox failed, trying Godbolt:', wandboxErr);
-  }
-
-  // ─── Fallback 2: Godbolt ────────────────────────────────────────────────
-  try {
-    const compilerId = language === 'c' ? 'cg122' : 'g122';
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-
-    const res = await fetch(`https://godbolt.org/api/compiler/${compilerId}/compile`, {
-      method: 'POST',
-      signal: controller.signal,
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({
-        source: code,
-        options: {
-          userArguments: options,
-          executeParameters: { stdin, args: [] },
-          compilerOptions: { executorRequest: true },
-          filters: { execute: true },
-        },
-        lang: language === 'c' ? 'c' : 'c++',
-        allowStoreCodeDebug: false,
-      }),
-    });
-    clearTimeout(timeout);
-
-    if (!res.ok) throw new Error('Godbolt failed');
-
-    const data = await res.json() as {
-      execResult?: { stdout?: { text: string }[]; code?: number };
-      stderr?: { text: string }[];
-      code?: number;
-    };
-
-    const stdout = (data.execResult?.stdout ?? []).map((l) => l.text).join('\n');
-    const stderr = (data.stderr ?? []).map((l) => l.text).join('\n');
-    const status = data.execResult?.code ?? 1;
-
-    return {
-      stdout,
-      stderr,
-      status,
-      exitCode: status,
-      inputsUsed,
-      compileError: stderr || undefined,
-      errors: parseGccErrors(stderr)
-    };
-  } catch {
+    console.warn('[cppRunner] Wandbox failed:', wandboxErr);
     throw new Error('COMPILER_UNAVAILABLE');
   }
 }
-
