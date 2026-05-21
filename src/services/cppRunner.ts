@@ -46,14 +46,14 @@ export async function compileAndRun(
   // ─── Primary: Wandbox ───────────────────────────────────────────────────
   try {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
+    const timeout = setTimeout(() => controller.abort(), 20000);
 
     const res = await fetch('https://wandbox.org/api/compile.json', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: controller.signal,
       body: JSON.stringify({
-        compiler: 'gcc-head',
+        compiler: language === 'c' ? 'gcc-head' : 'gcc-head',
         code,
         options,
         stdin,
@@ -64,6 +64,8 @@ export async function compileAndRun(
     });
     clearTimeout(timeout);
 
+    // Treat 5xx as primary failure → fall through to Godbolt
+    if (res.status >= 500) throw new Error(`Wandbox server error ${res.status}`);
     if (!res.ok) throw new Error(`Wandbox HTTP ${res.status}`);
 
     const data = await res.json() as {
@@ -90,7 +92,8 @@ export async function compileAndRun(
       errors
     };
   } catch (primaryErr) {
-    // timeout หรือ network error → fallback to Godbolt
+    // timeout, network error, or 5xx → fallback to Godbolt
+    console.warn('[cppRunner] Wandbox failed, trying Godbolt:', primaryErr);
   }
 
   // ─── Fallback: Godbolt ──────────────────────────────────────────────────

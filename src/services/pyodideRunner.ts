@@ -47,51 +47,40 @@ export async function initPyodide(onStatus: (msg: string) => void): Promise<any>
   }
 }
 
-export type PythonInputHook = (prompt: string) => Promise<string>;
-
+/**
+ * Run Python code with pre-supplied stdin lines (synchronous queue).
+ * Each call to input() pops the next line from stdinLines.
+ * onInputNeeded is called when more input is needed than provided.
+ */
 export async function runPython(
   code: string,
   onOutput: (text: string, type: 'output' | 'error') => void,
   onStatus: (msg: string) => void,
-  inputHook?: PythonInputHook,
+  stdinLines: string[] = [],
 ): Promise<void> {
   const py = await initPyodide(onStatus);
 
+  // Clone the stdin array so we can pop from it
+  const stdinQueue = [...stdinLines];
+
+  // Set up synchronous stdin via Pyodide's setStdin
+  // Each call to read() returns the next line + newline, or '' for EOF
   py.setStdout({ batched: (msg: string) => onOutput(msg, 'output') });
   py.setStderr({ batched: (msg: string) => onOutput(msg, 'error') });
 
-  // Override Python's input() with async hook if provided
-  if (inputHook) {
-    // We need to bridge async JS -> sync Python via a workaround
-    // Store the hook in a JS-accessible global for Pyodide to call
-    (window as any).__nextcodeInputHook = inputHook;
-
-    // Patch Python builtins.input to call our JS hook
-    py.runPython(`
-import sys
-import js
-
-async def _js_input(prompt=''):
-    result = await js.__nextcodeInputHook(str(prompt) if prompt else '')
-    return str(result)
-
-import builtins
-import asyncio
-
-# We create a synchronous wrapper that uses the event loop
-_orig_input = builtins.input
-
-def _patched_input(prompt=''):
-    import js
-    # Use Pyodide's synchronous bridge to run async JS
-    result = js.__nextcodeInputHook(str(prompt) if prompt else '').then
-    # Fallback: run async function synchronously via pyodide
-    import pyodide
-    return pyodide.webloop.WebLoop().run_until_complete(_js_input(prompt))
-
-builtins.input = _patched_input
-`);
-  }
+  // setStdin with a sync function — returns next line or '' (EOF)
+  py.setStdin({
+    stdin: (): string => {
+      if (stdinQueue.length > 0) {
+        const line = stdinQueue.shift()!;
+        // Echo the input to output so user sees what was typed
+        onOutput(line, 'output');
+        return line + '\n';
+      }
+      // EOF — return empty string
+      return '';
+    },
+  });
 
   try {
     onStatus('กำลังโหลด packages...');
@@ -102,15 +91,9 @@ builtins.input = _patched_input
     const msg = e instanceof Error ? e.message : String(e);
     onOutput(msg, 'error');
   } finally {
-    // Restore original input behavior for next run
-    if (inputHook) {
-      try {
-        py.runPython(`
-import builtins
-builtins.input = _orig_input
-`);
-      } catch {/* ignore */}
-      delete (window as any).__nextcodeInputHook;
-    }
+    // Reset stdin to default
+    try {
+      py.setStdin(null);
+    } catch {/* ignore */}
   }
 }

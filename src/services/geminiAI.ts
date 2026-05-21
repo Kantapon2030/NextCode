@@ -1,6 +1,7 @@
-// Built-in key (fallback สำหรับผู้ใช้ที่ยังไม่มี key ของตัวเอง)
-const _K = ['AIzaSyBJpY', 'lBr4W9WPT5', 'TGLB3NQtqM', '8sQubWnlg'].join('');
-export const BUILTIN_KEY = _K;
+// Built-in key — loaded from Vercel env var VITE_GEMINI_API_KEY (fallback สำหรับผู้ใช้ที่ยังไม่มี key ของตัวเอง)
+// ไม่ hardcode ใน source เพื่อความปลอดภัย ใส่ใน Vercel → Settings → Environment Variables
+const _ENV_KEY = import.meta.env.VITE_GEMINI_API_KEY ?? '';
+export const BUILTIN_KEY = _ENV_KEY;
 
 const GEMINI_BASE =
   'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';

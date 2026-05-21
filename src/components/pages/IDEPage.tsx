@@ -53,7 +53,7 @@ export default function IDEPage() {
     commandPaletteOpen, setCommandPaletteOpen,
     showMultiTabBanner, setShowMultiTabBanner,
     addConsoleEntry, clearConsole,
-    accessToken,
+    accessToken, autoSyncDrive,
     resetProjectState,
     theme,
   } = store;
