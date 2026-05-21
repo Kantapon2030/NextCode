@@ -285,9 +285,9 @@ export function TerminalPane({
 
         // Analyze stdin requirements
         const expectedCount = countExpectedInputs(currentContent, language);
-        let isWaiting = false;
+        let isWaiting = result.isWaiting || false;
 
-        if (expectedCount > 0) {
+        if (!isWaiting && expectedCount > 0) {
           if (inputs.length < expectedCount) {
             isWaiting = true;
           } else {

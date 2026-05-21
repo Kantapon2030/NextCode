@@ -42,6 +42,52 @@ function parseGccErrors(stderr: string): CompileError[] {
   return errors;
 }
 
+function processRunResult(
+  stdout: string,
+  stderr: string,
+  status: number,
+  inputsUsed: string[],
+  errors: CompileError[],
+  compileError?: string
+): CompileResult {
+  let cleanStderr = stderr;
+  let exitCode = status;
+  let isWaiting = false;
+
+  if (
+    status === 99 ||
+    status === 139 ||
+    stderr.includes('std::__ios_failure') ||
+    stderr.includes('basic_ios::clear') ||
+    stderr.includes('iostream error')
+  ) {
+    isWaiting = true;
+    exitCode = 0;
+    cleanStderr = stderr
+      .split('\n')
+      .filter(
+        (line) =>
+          !line.includes('std::__ios_failure') &&
+          !line.includes('basic_ios::clear') &&
+          !line.includes('iostream error') &&
+          !line.includes('Program terminated with signal')
+      )
+      .join('\n')
+      .trim();
+  }
+
+  return {
+    stdout,
+    stderr: cleanStderr,
+    status: exitCode,
+    exitCode,
+    inputsUsed,
+    compileError,
+    errors,
+    isWaiting,
+  };
+}
+
 export async function compileAndRun(
   code: string,
   language: 'c' | 'cpp',
@@ -130,39 +176,8 @@ struct StdinInitializer {
       errors = parseGccErrors(cleanStderr);
     }
 
-    let status = didExecute ? data.code : -1;
-    let isWaiting = false;
-
-    // Detect EOF failure in C++ (139/SIGSEGV caused by std::ios_base::failure crash)
-    // or C (exited with exit code 99)
-    if (
-      status === 99 ||
-      status === 139 ||
-      stderr.includes('std::__ios_failure') ||
-      stderr.includes('basic_ios::clear') ||
-      stderr.includes('iostream error')
-    ) {
-      isWaiting = true;
-      status = 0; // treat as clean EOF wait
-      // Strip crash traces from stderr
-      stderr = stderr.split('\n').filter(line => 
-        !line.includes('std::__ios_failure') && 
-        !line.includes('basic_ios::clear') && 
-        !line.includes('iostream error') &&
-        !line.includes('Program terminated with signal')
-      ).join('\n').trim();
-    }
-
-    return {
-      stdout,
-      stderr,
-      status,
-      exitCode: status,
-      inputsUsed,
-      compileError,
-      errors,
-      isWaiting
-    };
+    const status = didExecute ? data.code : -1;
+    return processRunResult(stdout, stderr, status, inputsUsed, errors, compileError);
   } catch (primaryErr) {
     console.warn('[cppRunner] Godbolt failed, trying Piston as fallback:', primaryErr);
   }
@@ -185,7 +200,7 @@ struct StdinInitializer {
         files: [
           {
             name: filename,
-            content: code,
+            content: instrumentedCode,
           }
         ],
         stdin,
@@ -210,15 +225,7 @@ struct StdinInitializer {
       const status = data.run.code ?? 0;
       const errors = parseGccErrors(stderr);
 
-      return {
-        stdout,
-        stderr,
-        status,
-        exitCode: status,
-        inputsUsed,
-        compileError: stderr || undefined,
-        errors
-      };
+      return processRunResult(stdout, stderr, status, inputsUsed, errors);
     }
     throw new Error('Piston invalid response format');
   } catch (pistonErr) {
@@ -236,7 +243,7 @@ struct StdinInitializer {
       signal: controller.signal,
       body: JSON.stringify({
         compiler: language === 'c' ? 'gcc-head' : 'gcc-head',
-        code,
+        code: instrumentedCode,
         options,
         stdin,
         'compiler-option-raw': '',
@@ -262,15 +269,7 @@ struct StdinInitializer {
     const status = parseInt(String(data.status ?? '0'), 10);
     const errors = parseGccErrors(compilerError);
 
-    return {
-      stdout,
-      stderr,
-      status,
-      exitCode: status,
-      inputsUsed,
-      compileError: compilerError || undefined,
-      errors
-    };
+    return processRunResult(stdout, stderr, status, inputsUsed, errors, compilerError || undefined);
   } catch (wandboxErr) {
     console.warn('[cppRunner] Wandbox failed:', wandboxErr);
     throw new Error('COMPILER_UNAVAILABLE');
