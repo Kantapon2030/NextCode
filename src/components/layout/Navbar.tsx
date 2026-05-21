@@ -16,9 +16,10 @@ import { db } from '../../storage/db';
 interface Props {
   onSave: () => void;
   onToggleCommandPalette: () => void;
+  onDriveSync?: () => Promise<void>;
 }
 
-export function Navbar({ onSave, onToggleCommandPalette }: Props) {
+export function Navbar({ onSave, onToggleCommandPalette, onDriveSync }: Props) {
   const navigate = useNavigate();
   const {
     user, currentProject, saveStatus, syncStatus, theme,
@@ -28,6 +29,7 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
   const [showProjectMenu, setShowProjectMenu] = useState(false);
   const [showExportMenu, setShowExportMenu] = useState(false);
   const [showAvatarMenu, setShowAvatarMenu] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const projectRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const avatarRef = useRef<HTMLDivElement>(null);
@@ -84,6 +86,16 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
     await clearUserSession();
     logout();
     navigate('/');
+  }
+
+  async function handleSyncToDrive() {
+    if (!onDriveSync || isSyncing) return;
+    setIsSyncing(true);
+    try {
+      await onDriveSync();
+    } finally {
+      setIsSyncing(false);
+    }
   }
 
   const navBg = theme === 'dark'
@@ -174,6 +186,34 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
             </div>
           )}
         </div>
+
+        {/* Drive Sync button */}
+        {onDriveSync && (
+          <button
+            id="btn-drive-sync"
+            onClick={handleSyncToDrive}
+            disabled={isSyncing}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-xs ${
+              syncStatus === 'synced'
+                ? 'text-green-400 hover:bg-surface-800'
+                : syncStatus === 'syncing' || isSyncing
+                ? 'text-blue-400 hover:bg-surface-800'
+                : syncStatus === 'error'
+                ? 'text-red-400 hover:bg-surface-800'
+                : 'text-zinc-400 hover:bg-surface-800 hover:text-white'
+            }`}
+            title={`Sync to Google Drive (${syncStatus})`}
+          >
+            {isSyncing || syncStatus === 'syncing' ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : syncStatus === 'synced' ? (
+              <CheckCircle className="w-4 h-4" />
+            ) : (
+              <Cloud className="w-4 h-4" />
+            )}
+            <span className="hidden sm:inline">Drive</span>
+          </button>
+        )}
 
         {/* AI toggle */}
         <button

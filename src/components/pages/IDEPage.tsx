@@ -7,6 +7,7 @@ import {
   getMimeType, getMonacoLanguage
 } from '../../storage/vfsHelpers';
 import { broadcastVFSUpdate, initBroadcastChannel } from '../../storage/syncManager';
+import { createProjectFolder, syncTreeToDrive } from '../../services/googleDrive';
 import { ErrorBoundary } from '../shared/ErrorBoundary';
 import { LoadingSpinner } from '../shared/LoadingSpinner';
 import { toast } from '../shared/Toast';
@@ -45,13 +46,15 @@ export default function IDEPage() {
     currentProject, setCurrentProject,
     vfs, setVFS, updateVFSFile,
     openTabs, activeTab, openTab, closeTab, setActiveTab,
-    setSaveStatus, syncStatus,
+    setSaveStatus, setSyncStatus, syncStatus,
     activeLanguage, setActiveLanguage,
     previewMode, setPreviewMode,
     aiPanelOpen, setAIPanelOpen,
     commandPaletteOpen, setCommandPaletteOpen,
     showMultiTabBanner, setShowMultiTabBanner,
     addConsoleEntry, clearConsole,
+    accessToken,
+    resetProjectState,
     theme,
   } = store;
 
@@ -77,23 +80,32 @@ export default function IDEPage() {
   useEffect(() => {
     if (!projectId) { navigate('/dashboard'); return; }
     async function load() {
+      // Reset previous project state (clears tabs, terminal, vfs)
+      resetProjectState();
+      setLoading(true);
+      setCompileErrors([]);
+
       const project = await db.projects.get(projectId!);
       if (!project) { navigate('/dashboard'); return; }
       setCurrentProject(project as unknown as typeof currentProject);
       const loadedVFS = await loadVFS(projectId!);
       setVFS(loadedVFS);
 
-      // Open default files
-      const fileNames = Object.keys(loadedVFS.files);
-      const defaultFile = fileNames.find((f) => f === 'index.html') ??
-        fileNames.find((f) => f === 'main.py') ??
-        fileNames.find((f) => f === 'main.c') ??
-        fileNames.find((f) => f === 'main.cpp') ??
-        fileNames[0];
+      // Open default files based on project language
+      const allPaths = Object.keys(loadedVFS.flatIndex).filter(
+        (p) => loadedVFS.flatIndex[p].type === 'file'
+      );
+      const defaultFile =
+        allPaths.find((f) => f === 'index.html') ??
+        allPaths.find((f) => f === 'main.py') ??
+        allPaths.find((f) => f.endsWith('.c')) ??
+        allPaths.find((f) => f.endsWith('.cpp')) ??
+        allPaths.find((f) => f.endsWith('.py')) ??
+        allPaths[0];
       if (defaultFile) openTab(defaultFile);
 
       // Determine preview mode
-      const hasHtml = fileNames.some((f) => f.endsWith('.html'));
+      const hasHtml = allPaths.some((f) => f.endsWith('.html'));
       setPreviewMode(hasHtml ? 'web' : 'terminal');
       setLoading(false);
     }
@@ -146,6 +158,34 @@ export default function IDEPage() {
     setDirtyTabs((prev) => { const next = new Set(prev); next.delete(activeTab); return next; });
     setSaveStatus('saved');
     toast('success', '✓ บันทึกแล้ว');
+  }
+
+  async function handleDriveSync() {
+    if (!projectId || !accessToken || !currentProject) {
+      toast('error', 'กรุณาเข้าสู่ระบบ Google Drive ก่อน');
+      return;
+    }
+    try {
+      setSyncStatus('syncing');
+      let folderId = currentProject.drive_folder_id;
+      if (!folderId) {
+        folderId = await createProjectFolder(currentProject.name, projectId, accessToken);
+        await db.projects.update(projectId, { drive_folder_id: folderId });
+        store.updateProject(projectId, { drive_folder_id: folderId });
+      }
+      await syncTreeToDrive(projectId, accessToken, folderId, vfs.tree);
+      setSyncStatus('synced');
+      toast('success', '☁ Sync to Google Drive สำเร็จ');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg === 'TOKEN_EXPIRED') {
+        setSyncStatus('error');
+        toast('error', 'Token หมดอายุ กรุณา login ใหม่');
+      } else {
+        setSyncStatus('error');
+        toast('error', `Sync ล้มเหลว: ${msg}`);
+      }
+    }
   }
 
   // File tree ops
@@ -254,7 +294,7 @@ export default function IDEPage() {
     <div className="flex flex-col h-full overflow-hidden">
       {/* Navbar */}
       <ErrorBoundary>
-        <Navbar onSave={handleManualSave} onToggleCommandPalette={() => setCommandPaletteOpen(true)} />
+        <Navbar onSave={handleManualSave} onToggleCommandPalette={() => setCommandPaletteOpen(true)} onDriveSync={handleDriveSync} />
       </ErrorBoundary>
 
       {/* Multi-tab banner */}

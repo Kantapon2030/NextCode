@@ -106,6 +106,7 @@ interface AppState {
   setTheme: (theme: 'dark' | 'light') => void;
   setFontSize: (size: number) => void;
   setShowMultiTabBanner: (show: boolean) => void;
+  resetProjectState: () => void;
   logout: () => void;
 }
 
@@ -193,8 +194,22 @@ export const useAppStore = create<AppState>((set) => ({
     set((s) => {
       const node = s.vfs.flatIndex[path];
       if (!node || node.type !== 'folder') return {};
-      const isExpanded = !node.isExpanded;
-      const newTree = setFolderAtPath(s.vfs.tree, path, { isExpanded });
+      // Deep-clone and update ONLY isExpanded, preserving children
+      function updateExpanded(nodes: Record<string, import('../types').VFSNode>): Record<string, import('../types').VFSNode> {
+        const result: Record<string, import('../types').VFSNode> = {};
+        for (const key in nodes) {
+          const n = nodes[key];
+          if (n.path === path) {
+            result[key] = { ...n, isExpanded: !n.isExpanded };
+          } else if (n.type === 'folder' && n.children) {
+            result[key] = { ...n, children: updateExpanded(n.children) };
+          } else {
+            result[key] = n;
+          }
+        }
+        return result;
+      }
+      const newTree = updateExpanded(s.vfs.tree);
       const newFlatIndex = buildFlatIndex(newTree);
       const { files, assets } = buildCompatibilityMaps(newTree);
       return { vfs: { tree: newTree, flatIndex: newFlatIndex, files, assets } };
@@ -238,6 +253,14 @@ export const useAppStore = create<AppState>((set) => ({
   setTheme: (theme) => set({ theme }),
   setFontSize: (fontSize) => set({ fontSize }),
   setShowMultiTabBanner: (showMultiTabBanner) => set({ showMultiTabBanner }),
+  resetProjectState: () =>
+    set({
+      openTabs: [],
+      activeTab: null,
+      terminalOutput: [],
+      vfs: { tree: {}, flatIndex: {}, files: {}, assets: {} },
+      currentProject: null,
+    }),
   logout: () =>
     set({
       user: null,

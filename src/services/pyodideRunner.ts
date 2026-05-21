@@ -47,15 +47,51 @@ export async function initPyodide(onStatus: (msg: string) => void): Promise<any>
   }
 }
 
+export type PythonInputHook = (prompt: string) => Promise<string>;
+
 export async function runPython(
   code: string,
   onOutput: (text: string, type: 'output' | 'error') => void,
-  onStatus: (msg: string) => void
+  onStatus: (msg: string) => void,
+  inputHook?: PythonInputHook,
 ): Promise<void> {
   const py = await initPyodide(onStatus);
 
   py.setStdout({ batched: (msg: string) => onOutput(msg, 'output') });
   py.setStderr({ batched: (msg: string) => onOutput(msg, 'error') });
+
+  // Override Python's input() with async hook if provided
+  if (inputHook) {
+    // We need to bridge async JS -> sync Python via a workaround
+    // Store the hook in a JS-accessible global for Pyodide to call
+    (window as any).__nextcodeInputHook = inputHook;
+
+    // Patch Python builtins.input to call our JS hook
+    py.runPython(`
+import sys
+import js
+
+async def _js_input(prompt=''):
+    result = await js.__nextcodeInputHook(str(prompt) if prompt else '')
+    return str(result)
+
+import builtins
+import asyncio
+
+# We create a synchronous wrapper that uses the event loop
+_orig_input = builtins.input
+
+def _patched_input(prompt=''):
+    import js
+    # Use Pyodide's synchronous bridge to run async JS
+    result = js.__nextcodeInputHook(str(prompt) if prompt else '').then
+    # Fallback: run async function synchronously via pyodide
+    import pyodide
+    return pyodide.webloop.WebLoop().run_until_complete(_js_input(prompt))
+
+builtins.input = _patched_input
+`);
+  }
 
   try {
     onStatus('กำลังโหลด packages...');
@@ -65,5 +101,16 @@ export async function runPython(
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
     onOutput(msg, 'error');
+  } finally {
+    // Restore original input behavior for next run
+    if (inputHook) {
+      try {
+        py.runPython(`
+import builtins
+builtins.input = _orig_input
+`);
+      } catch {/* ignore */}
+      delete (window as any).__nextcodeInputHook;
+    }
   }
 }

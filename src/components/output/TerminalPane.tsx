@@ -1,6 +1,6 @@
-import React, { useRef, useState, useCallback, useEffect } from 'react';
+import React, { useRef, useState, useCallback, useEffect, KeyboardEvent } from 'react';
 import { useAppStore, TerminalEntry } from '../../store/appStore';
-import { Play, Square, Trash2, Terminal, Edit2 } from 'lucide-react';
+import { Play, Square, Trash2, Terminal, ChevronRight } from 'lucide-react';
 import { runPython } from '../../services/pyodideRunner';
 import { compileAndRun, CompileError } from '../../services/cppRunner';
 
@@ -19,19 +19,19 @@ export function TerminalPane({
   const { terminalOutput, addTerminalEntry, clearTerminal, theme } = useAppStore();
   const [running, setRunning] = useState(false);
   const [statusMsg, setStatusMsg] = useState('');
-  const [stdin, setStdin] = useState('');
-  const [phase, setPhase] = useState<'input' | 'output'>('output');
+  const [inputVal, setInputVal] = useState('');
+
+  // For C/C++ — collect stdin lines before running
+  const [stdinLines, setStdinLines] = useState<string[]>([]);
+  const [waitingForInput, setWaitingForInput] = useState(false);
+
   const outputRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  // Sync phase with language when language changes
-  useEffect(() => {
-    if (language === 'c' || language === 'cpp') {
-      setPhase('input');
-    } else {
-      setPhase('output');
-    }
-  }, [language]);
+  // Python stdin queue for interactive input()
+  const stdinQueueRef = useRef<string[]>([]);
+  const stdinResolveRef = useRef<((val: string) => void) | null>(null);
 
   const scrollToBottom = useCallback(() => {
     setTimeout(() => {
@@ -41,8 +41,15 @@ export function TerminalPane({
     }, 30);
   }, []);
 
+  // Auto-focus input when terminal is ready
+  useEffect(() => {
+    if (!running) {
+      inputRef.current?.focus();
+    }
+  }, [running]);
+
   function addEntry(content: string, type: TerminalEntry['type']) {
-    if (!content?.trim()) return;          // ← skip empty entries
+    if (!content && content !== '') return;
     addTerminalEntry({
       id: `${Date.now()}-${Math.random()}`,
       timestamp: Date.now(),
@@ -67,125 +74,185 @@ export function TerminalPane({
     }
   }
 
+  // Handle Enter key in input
+  const handleInputKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+    const val = inputVal;
+
+    if (language === 'python' && running) {
+      // Python interactive input() — resolve pending promise
+      addEntry(`${val}`, 'output');
+      setInputVal('');
+      if (stdinResolveRef.current) {
+        stdinResolveRef.current(val);
+        stdinResolveRef.current = null;
+      } else {
+        stdinQueueRef.current.push(val);
+      }
+    } else if ((language === 'c' || language === 'cpp') && !running) {
+      // C/C++ pre-run: collect stdin lines
+      addEntry(`${val}`, 'system');
+      setStdinLines((prev) => [...prev, val]);
+      setInputVal('');
+      setWaitingForInput(false);
+    }
+  };
+
   async function handleRun() {
     if (running) return;
     setRunning(true);
-    setPhase('output'); // Switch to output on run
     clearTerminal();
-    safeSetErrors([]);   // ล้าง markers เก่า
-    addEntry(`▶ กำลังรัน ${currentFile}...`, 'system');
+    safeSetErrors([]);
+    stdinQueueRef.current = [];
+    stdinResolveRef.current = null;
+    addEntry(`▶ ${currentFile}`, 'system');
 
     try {
       if (language === 'python') {
-        addEntry('กำลังโหลด Python runtime (Pyodide)...', 'system');
+        addEntry('กำลังโหลด Python runtime...', 'system');
+
+        // Python async input() hook
+        async function pyInputHook(prompt: string): Promise<string> {
+          if (prompt) addEntry(prompt, 'output');
+          // Check queue first
+          if (stdinQueueRef.current.length > 0) {
+            return stdinQueueRef.current.shift()!;
+          }
+          // Wait for user to type
+          return new Promise<string>((resolve) => {
+            stdinResolveRef.current = resolve;
+          });
+        }
+
         await runPython(
           currentContent,
           (text, type) => addEntry(text, type === 'error' ? 'error' : 'output'),
-          (msg) => { setStatusMsg(msg); if (msg) addEntry(msg, 'system'); }
+          (msg) => { setStatusMsg(msg); if (msg) addEntry(msg, 'system'); },
+          pyInputHook,
         );
         addEntry('\n[Python สิ้นสุดการทำงาน]', 'system');
 
       } else if (language === 'c' || language === 'cpp') {
-        addEntry('$ ./program', 'system');
-        const inputs = stdin.split('\n').map(l => l.trim()).filter(l => l !== '');
-        inputs.forEach((input, index) => {
-          addEntry(`> stdin[${index}]: ${input}`, 'system');
-        });
-
+        const stdin = stdinLines.join('\n');
         addEntry('กำลังส่งไปยัง Wandbox compiler...', 'system');
         const result = await compileAndRun(currentContent, language as 'c' | 'cpp', stdin);
 
-        // แสดง compile errors ใน terminal
         if (result.stderr) {
           for (const line of result.stderr.split('\n')) {
             if (line.trim()) addEntry(line, 'error');
           }
         }
-
-        // ส่ง markers ไปยัง Monaco (safe)
         safeSetErrors(result.errors);
 
-        // แสดง stdout
         if (result.stdout) {
+          // Print stdout preserving newlines
           addEntry(result.stdout, 'output');
         }
 
-        // Exit code
         const exitLabel =
           result.exitCode === 0
             ? '[โปรแกรมจบสำเร็จ code: 0 ✓]'
             : `[โปรแกรมจบด้วย code: ${result.exitCode}]`;
         addEntry(exitLabel, result.exitCode === 0 ? 'system' : 'error');
 
+        // Reset stdin after run
+        setStdinLines([]);
       } else {
         addEntry(`❌ ยังไม่รองรับภาษา: ${language}`, 'error');
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       if (msg === 'COMPILER_UNAVAILABLE') {
-        addEntry('❌ ไม่สามารถเชื่อมต่อ compiler server ได้\nลองตรวจสอบอินเทอร์เน็ตหรือรอแป๊บนึงแล้วลองใหม่', 'error');
+        addEntry('❌ ไม่สามารถเชื่อมต่อ compiler server ได้\nลองตรวจสอบอินเทอร์เน็ต', 'error');
       } else if (msg.includes('abort') || msg.includes('timeout')) {
-        addEntry('⏱ Compiler หมดเวลา (timeout 15s) — ลองใหม่อีกครั้ง', 'error');
+        addEntry('⏱ Compiler หมดเวลา (timeout 15s)', 'error');
       } else {
         addEntry(`❌ ${msg}`, 'error');
       }
     } finally {
       setRunning(false);
       setStatusMsg('');
+      stdinResolveRef.current = null;
+      setTimeout(() => inputRef.current?.focus(), 100);
     }
   }
 
   function handleStop() {
     abortRef.current?.abort();
+    // Resolve any pending input with empty string
+    if (stdinResolveRef.current) {
+      stdinResolveRef.current('');
+      stdinResolveRef.current = null;
+    }
     setRunning(false);
     addEntry('\n[หยุดการทำงานโดยผู้ใช้]', 'system');
   }
 
-  const bg      = theme === 'dark' ? 'bg-surface-950 border-border' : 'bg-zinc-900 border-zinc-700';
-  const toolbar = theme === 'dark' ? 'bg-surface-800 border-border' : 'bg-zinc-800 border-zinc-700';
+  function handleClear() {
+    clearTerminal();
+    safeSetErrors([]);
+    setStdinLines([]);
+    setInputVal('');
+  }
+
+  const isCpp = language === 'c' || language === 'cpp';
+  const isPython = language === 'python';
+  const isInteractive = running && isPython;
+  const isPreInput = isCpp && !running;
+
+  // Input placeholder text
+  const inputPlaceholder = isInteractive
+    ? 'พิมพ์ input สำหรับ input() แล้วกด Enter...'
+    : isPreInput
+    ? 'พิมพ์ stdin แล้วกด Enter (เพิ่มทีละบรรทัด)...'
+    : 'กด ▶ รัน เพื่อเริ่มโปรแกรม...';
+
+  const showInputBar = isInteractive || isPreInput;
 
   return (
-    <div className={`flex flex-col h-full border-l ${bg}`}>
+    <div className="flex flex-col h-full bg-zinc-950 font-mono text-xs">
       {/* Toolbar */}
-      <div className={`flex items-center gap-2 px-3 py-2 border-b shrink-0 ${toolbar}`}>
-        <Terminal className="w-4 h-4 text-primary-400" />
-        <span className="text-xs font-medium text-zinc-400 uppercase tracking-wide">
-          Terminal
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-800 bg-zinc-900 shrink-0">
+        <Terminal className="w-3.5 h-3.5 text-emerald-400" />
+        <span className="text-xs font-medium text-zinc-400 uppercase tracking-wide">Terminal</span>
+
+        {/* Language badge */}
+        <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+          isCpp ? 'bg-cyan-900/60 text-cyan-300' :
+          isPython ? 'bg-green-900/60 text-green-300' :
+          'bg-zinc-800 text-zinc-400'
+        }`}>
+          {language.toUpperCase()}
         </span>
+
+        {stdinLines.length > 0 && isCpp && !running && (
+          <span className="text-[10px] text-amber-400 ml-1">
+            stdin: {stdinLines.length} บรรทัด
+          </span>
+        )}
+
         {statusMsg && (
           <span className="text-xs text-primary-400 animate-pulse truncate max-w-32">
             {statusMsg}
           </span>
         )}
-        <div className="ml-auto flex gap-1">
-          {/* Edit input and run again button (C/C++) */}
-          {(language === 'c' || language === 'cpp') && phase === 'output' && !running && (
-            <button
-              onClick={() => setPhase('input')}
-              className="flex items-center gap-1 px-2.5 py-1 bg-surface-700 hover:bg-surface-600 text-zinc-300 rounded-lg text-xs font-medium transition-colors"
-              title="แก้ไข Input และรันใหม่"
-            >
-              <Edit2 className="w-3 h-3 text-zinc-400" />
-              <span>แก้ input</span>
-            </button>
-          )}
 
+        <div className="ml-auto flex gap-1">
           {/* Run button */}
           <button
             id="btn-run"
             onClick={handleRun}
             disabled={running}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-500 disabled:opacity-60 text-white rounded-lg text-xs font-medium transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg text-xs font-medium transition-colors"
           >
             {running ? (
               <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
             ) : (
-              <Play className="w-3 h-3" />
+              <Play className="w-3 h-3 fill-current" />
             )}
             รัน
           </button>
 
-          {/* Stop button */}
           {running && (
             <button
               onClick={handleStop}
@@ -196,10 +263,9 @@ export function TerminalPane({
             </button>
           )}
 
-          {/* Clear button */}
           <button
-            onClick={() => { clearTerminal(); safeSetErrors([]); if (language === 'c' || language === 'cpp') setPhase('input'); }}
-            className="p-1.5 hover:bg-surface-700 text-zinc-500 rounded-lg transition-colors"
+            onClick={handleClear}
+            className="p-1.5 hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300 rounded-lg transition-colors"
             title="ล้าง terminal"
           >
             <Trash2 className="w-3 h-3" />
@@ -207,74 +273,89 @@ export function TerminalPane({
         </div>
       </div>
 
-      {/* Main Content Area: Input or Output */}
-      {phase === 'input' && (language === 'c' || language === 'cpp') ? (
-        <div className="flex-1 flex flex-col p-4 overflow-y-auto justify-center">
-          <div className="max-w-md mx-auto w-full bg-surface-900/30 border border-surface-800/80 rounded-xl p-5 flex flex-col gap-4 shadow-xl">
-            <div>
-              <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                <Edit2 className="w-4 h-4 text-primary-400" />
-                C/C++ Terminal Input
-              </h3>
-              <p className="text-xs text-zinc-400 mt-1">
-                ป้อนข้อมูล Standard Input (stdin) ที่โปรแกรมของคุณต้องการอ่าน
-              </p>
-            </div>
-            
-            <textarea
-              value={stdin}
-              onChange={(e) => setStdin(e.target.value)}
-              placeholder="กรอกข้อมูล Input ที่นี่... (กด Enter เพื่อขึ้นบรรทัดใหม่)"
-              className="w-full bg-surface-950 border border-surface-850 hover:border-surface-700 focus:border-primary-500 rounded-lg p-3 text-xs text-zinc-100 font-mono outline-none transition-all resize-none h-44 placeholder-zinc-700 shadow-inner"
-            />
-            
-            <div className="text-zinc-500 text-[11px] leading-relaxed">
-              * โปรแกรมจะถูกส่งไปประมวลผลพร้อมข้อมูลชุดนี้ และแสดงการรับข้อมูลแต่ละบรรทัดในผลลัพธ์
-            </div>
-
-            <button
-              onClick={handleRun}
-              disabled={running}
-              className="flex items-center justify-center gap-2 w-full py-2 bg-green-600 hover:bg-green-500 disabled:opacity-60 text-white rounded-lg text-xs font-semibold transition-all active:scale-[0.98]"
-            >
-              {running ? (
-                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Play className="w-3.5 h-3.5 fill-current" />
-              )}
-              รันโปรแกรมพร้อม Input
-            </button>
-          </div>
-        </div>
-      ) : (
-        /* Output area */
-        <div
-          ref={outputRef}
-          className="flex-1 overflow-y-auto p-3 terminal-output font-mono text-xs select-text selection:bg-zinc-800 selection:text-white"
-        >
-          {terminalOutput.length === 0 ? (
-            <p className="text-zinc-600 text-xs select-none">
-              กด [รัน ▶] เพื่อรันโปรแกรม...
-            </p>
-          ) : (
-            terminalOutput.map((entry) => (
-              <div
-                key={entry.id}
-                className={`leading-relaxed whitespace-pre-wrap ${
-                  entry.type === 'error'
-                    ? 'text-red-400 font-semibold'
-                    : entry.type === 'system'
-                    ? 'text-emerald-500 font-medium'
-                    : 'text-zinc-200'
-                }`}
-              >
-                {entry.content}
-              </div>
-            ))
-          )}
+      {/* Hint for C/C++ pre-input */}
+      {isCpp && !running && (
+        <div className="px-3 py-1.5 bg-zinc-900/50 border-b border-zinc-800/60 text-[11px] text-zinc-500 flex items-center gap-2 shrink-0">
+          <ChevronRight className="w-3 h-3 text-amber-500/70" />
+          {stdinLines.length === 0
+            ? 'พิมพ์ข้อมูล stdin ที่ต้องการส่งให้โปรแกรม (แต่ละ Enter = หนึ่งบรรทัด) แล้วกด ▶ รัน'
+            : `stdin พร้อม ${stdinLines.length} บรรทัด → กด ▶ รัน`}
         </div>
       )}
+
+      {/* Terminal output area */}
+      <div
+        ref={outputRef}
+        onClick={() => inputRef.current?.focus()}
+        className="flex-1 overflow-y-auto p-3 space-y-0.5 cursor-text select-text"
+        style={{ scrollbarWidth: 'thin', scrollbarColor: '#3f3f46 transparent' }}
+      >
+        {terminalOutput.length === 0 ? (
+          <div className="text-zinc-600 text-xs select-none flex items-center gap-1 mt-2">
+            <ChevronRight className="w-3 h-3" />
+            <span>
+              {isCpp
+                ? 'พิมพ์ stdin ด้านล่าง (ถ้ามี) แล้วกด [รัน ▶]'
+                : isPython
+                ? 'กด [รัน ▶] เพื่อเริ่ม Python'
+                : 'กด [รัน ▶] เพื่อรันโปรแกรม'}
+            </span>
+          </div>
+        ) : (
+          terminalOutput.map((entry) => (
+            <div
+              key={entry.id}
+              className={`leading-relaxed whitespace-pre-wrap break-all ${
+                entry.type === 'error'
+                  ? 'text-red-400'
+                  : entry.type === 'system'
+                  ? 'text-emerald-500/80'
+                  : 'text-zinc-200'
+              }`}
+            >
+              {entry.content}
+            </div>
+          ))
+        )}
+
+        {/* Blinking cursor when running & waiting for Python input */}
+        {isInteractive && (
+          <div className="flex items-center gap-1 text-zinc-300">
+            <ChevronRight className="w-3 h-3 text-emerald-400" />
+            <span className="inline-block w-1.5 h-3.5 bg-emerald-400 animate-pulse rounded-sm" />
+          </div>
+        )}
+      </div>
+
+      {/* Input bar — shown for C/C++ pre-run and Python interactive */}
+      <div className={`shrink-0 border-t ${
+        showInputBar ? 'border-emerald-800/60' : 'border-zinc-800'
+      } bg-zinc-900`}>
+        <div className="flex items-center px-2 py-1.5 gap-2">
+          <ChevronRight className={`w-3.5 h-3.5 shrink-0 ${
+            isInteractive ? 'text-emerald-400' :
+            isPreInput ? 'text-amber-400' :
+            'text-zinc-600'
+          }`} />
+          <input
+            ref={inputRef}
+            type="text"
+            value={inputVal}
+            onChange={(e) => setInputVal(e.target.value)}
+            onKeyDown={handleInputKeyDown}
+            disabled={!showInputBar}
+            placeholder={inputPlaceholder}
+            className={`flex-1 bg-transparent outline-none text-xs font-mono ${
+              showInputBar ? 'text-zinc-100 placeholder-zinc-600' : 'text-zinc-600 placeholder-zinc-700 cursor-default'
+            }`}
+            spellCheck={false}
+            autoComplete="off"
+          />
+          {showInputBar && (
+            <span className="text-[10px] text-zinc-600 shrink-0">Enter ↵</span>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
-
