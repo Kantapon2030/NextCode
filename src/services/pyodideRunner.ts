@@ -135,7 +135,7 @@ def custom_readline(*args, **kwargs):
         val = StdinBuffer.lines[StdinBuffer.index]
         StdinBuffer.index += 1
         print(val)
-        return val + '\n'
+        return val + '\\n'
     else:
         raise WaitingForInputException("WAITING_FOR_INPUT")
 
