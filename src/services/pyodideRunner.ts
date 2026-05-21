@@ -83,26 +83,23 @@ export async function runPython(
   return runWithNoDefine(async () => {
     const py = await initPyodide(onStatus);
 
-    // Clone the stdin array so we can pop from it
-    const stdinQueue = [...stdinLines];
-
-    py.setStdout({ batched: (msg: string) => onOutput(msg, 'output') });
-    py.setStderr({ batched: (msg: string) => onOutput(msg, 'error') });
-
-    // Set fallback stdin callback
-    py.setStdin({
-      stdin: (): string => {
-        if (stdinQueue.length > 0) {
-          const line = stdinQueue.shift()!;
-          onOutput(line, 'output');
-          return line + '\n';
-        }
-        return '';
-      },
-    });
+    // py.setStdout / py.setStderr are handled via CustomStdout/CustomStderr in Python
+    // so the output lands in onOutput immediately without line-buffering.
 
     try {
+      // Expose output callback to Python.
+      // Use a flag to suppress the entire WaitingForInputException traceback:
+      // once we see that keyword in stderr, stop forwarding any further stderr
+      // (the traceback is always the last thing before the exception surfaces in JS).
+      let suppressingWait = false;
       (window as any)._onPyOutput = (text: string, type: 'output' | 'error') => {
+        if (type === 'error') {
+          if (suppressingWait) return;
+          if (text.includes('WaitingForInputException')) {
+            suppressingWait = true;
+            return;
+          }
+        }
         onOutput(text, type);
       };
 
@@ -188,10 +185,7 @@ sys.stdin.readline = custom_readline
       onOutput(msg, 'error');
     } finally {
       delete (window as any)._onPyOutput;
-      // Reset stdin/input to default
-      try {
-        py.setStdin(null);
-      } catch {/* ignore */}
+      // Restore Python's original stdout/stderr
       try {
         await py.runPythonAsync(`
 import builtins
