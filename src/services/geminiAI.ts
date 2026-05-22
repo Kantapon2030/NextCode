@@ -109,7 +109,7 @@ export async function callGemini(
         delay = Math.min(delay * 2, 30_000); // max 30s
         continue;
       }
-      throw new Error('RATE_LIMIT');
+      throw new Error('Gemini API: Rate limit exceeded (429). Too many requests.');
     }
 
     if (!res.ok) {
@@ -118,9 +118,9 @@ export async function callGemini(
       };
       const errMsg = errBody?.error?.message ?? '';
       if (res.status === 403 || (res.status === 400 && errMsg.toLowerCase().includes('api key'))) {
-        throw new Error('API_KEY_INVALID');
+        throw new Error(`API_KEY_INVALID: ${errMsg || 'Invalid API Key'}`);
       }
-      throw new Error(`Gemini ${res.status}: ${errMsg}`);
+      throw new Error(`Gemini ${res.status}: ${errMsg || 'Unknown API Error'}`);
     }
 
     const data = await res.json() as {
@@ -136,7 +136,7 @@ export async function callGemini(
     return parseResponse(text);
   }
 
-  throw new Error('RATE_LIMIT');
+  throw new Error('Gemini API: Rate limit exceeded (429). Too many requests.');
 }
 
 function buildPrompt(req: GeminiRequest): string {
@@ -182,8 +182,13 @@ function parseResponse(text: string): GeminiResponse {
   return { explanation, fixes, rawText: text };
 }
 
+export interface TestKeyResult {
+  status: 'valid' | 'rate_limited' | 'invalid';
+  errorDetails?: string;
+}
+
 /** ทดสอบ key — 429 ถือว่า key ถูกต้องแต่ถึง quota */
-export async function testApiKey(apiKey: string): Promise<'valid' | 'rate_limited' | 'invalid'> {
+export async function testApiKey(apiKey: string): Promise<TestKeyResult> {
   try {
     const res = await fetch(`${GEMINI_BASE}?key=${apiKey}`, {
       method: 'POST',
@@ -193,10 +198,15 @@ export async function testApiKey(apiKey: string): Promise<'valid' | 'rate_limite
         generationConfig: { maxOutputTokens: 5 },
       }),
     });
-    if (res.ok) return 'valid';
-    if (res.status === 429) return 'rate_limited';
-    return 'invalid';
-  } catch {
-    return 'invalid';
+    if (res.ok) return { status: 'valid' };
+    if (res.status === 429) return { status: 'rate_limited', errorDetails: 'Rate limit exceeded (429). Key is valid but quota is exhausted.' };
+    
+    const errBody = await res.json().catch(() => ({})) as {
+      error?: { message?: string };
+    };
+    const errMsg = errBody?.error?.message ?? `HTTP Status ${res.status}`;
+    return { status: 'invalid', errorDetails: errMsg };
+  } catch (e: any) {
+    return { status: 'invalid', errorDetails: e.message || String(e) };
   }
 }

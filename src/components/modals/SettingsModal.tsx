@@ -18,6 +18,7 @@ export default function SettingsModal({ onClose }: Props) {
   const [newKey, setNewKey] = useState('');
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<'valid' | 'rate_limited' | 'invalid' | null>(null);
+  const [testErrorDetails, setTestErrorDetails] = useState<string | null>(null);
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<any>(null);
@@ -88,8 +89,12 @@ export default function SettingsModal({ onClose }: Props) {
     if (!key) return;
     setTesting(true);
     setTestResult(null);
+    setTestErrorDetails(null);
     const result = await testApiKey(key);
-    setTestResult(result);
+    setTestResult(result.status);
+    if (result.errorDetails) {
+      setTestErrorDetails(result.errorDetails);
+    }
     setTesting(false);
   }
 
@@ -230,7 +235,7 @@ export default function SettingsModal({ onClose }: Props) {
                 <div className="flex gap-2">
                   <button
                     onClick={handleTest}
-                    disabled={testing || !newKey}
+                    disabled={testing || (!newKey && !apiKey)}
                     className="flex items-center gap-1.5 px-4 py-2 bg-surface-700 hover:bg-surface-600 text-zinc-300 rounded-xl text-sm transition-colors disabled:opacity-50"
                   >
                     {testing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
@@ -258,6 +263,20 @@ export default function SettingsModal({ onClose }: Props) {
                     </button>
                   )}
                 </div>
+
+                {testErrorDetails && testResult === 'invalid' && (
+                  <div className="mt-2 text-xs text-red-400 bg-red-900/10 border border-red-900/30 p-2.5 rounded-lg flex items-start gap-1.5 whitespace-pre-wrap">
+                    <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+                    <span>สาเหตุ: {testErrorDetails}</span>
+                  </div>
+                )}
+
+                {testErrorDetails && testResult === 'rate_limited' && (
+                  <div className="mt-2 text-xs text-yellow-400 bg-yellow-900/10 border border-yellow-900/30 p-2.5 rounded-lg flex items-start gap-1.5 whitespace-pre-wrap">
+                    <CheckCircle className="w-3.5 h-3.5 text-yellow-400 shrink-0 mt-0.5" />
+                    <span>ข้อมูลเพิ่มเติม: {testErrorDetails}</span>
+                  </div>
+                )}
               </>
             )}
           </section>

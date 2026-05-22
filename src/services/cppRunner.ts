@@ -16,9 +16,26 @@ export interface CompileError {
   severity: 'error' | 'warning';
 }
 
-/** Strip ANSI escape codes from string */
-function stripAnsi(str: string): string {
-  return str.replace(/[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g, '');
+/** Strip ANSI escape codes from string — exported for use in TerminalPane */
+export function stripAnsi(str: string): string {
+  return (
+    str
+      // ESC[ sequences (CSI) — standard \x1b
+      .replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '')
+      // ESC] sequences (OSC)
+      .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\\\)/g, '')
+      // ESC( character set
+      .replace(/\x1b[()][A-Z0-9]/g, '')
+      // ESC alone
+      .replace(/\x1b[^[\]()]/g, '')
+      // \\033[ octal format (Wandbox sends this)
+      .replace(/\\033\[[0-9;]*[a-zA-Z]/g, '')
+      .replace(/\\033[^[]/g, '')
+      // \\e[ alternate form
+      .replace(/\\e\[[0-9;]*[a-zA-Z]/g, '')
+      // null bytes
+      .replace(/\x00/g, '')
+  );
 }
 
 /**
@@ -198,7 +215,7 @@ export async function compileAndRun(
     };
 
     const didExecute = !!data.didExecute;
-    const stdout = (data.stdout ?? []).map((l) => l.text).join('\n');
+    const stdout = stripAnsi((data.stdout ?? []).map((l) => l.text).join('\n'));
     let stderr = '';
     let compileError: string | undefined;
     let errors: CompileError[] = [];
@@ -251,7 +268,7 @@ export async function compileAndRun(
     };
 
     if (data.run) {
-      const stdout = data.run.stdout ?? '';
+      const stdout = stripAnsi(data.run.stdout ?? '');
       const rawStderr = data.run.stderr ?? '';
       const cleaned = cleanGccStderr(rawStderr, headerLines);
       const status = data.run.code ?? 0;
@@ -293,7 +310,7 @@ export async function compileAndRun(
       status?: string | number;
     };
 
-    const stdout = data.program_output ?? '';
+    const stdout = stripAnsi(data.program_output ?? '');
     const rawCompilerError = data.compiler_error ?? '';
     const rawProgramError = data.program_error ?? '';
     const cleanedCompilerError = cleanGccStderr(rawCompilerError, headerLines);
@@ -307,4 +324,105 @@ export async function compileAndRun(
     console.warn('[cppRunner] Wandbox failed:', wandboxErr);
     throw new Error('COMPILER_UNAVAILABLE');
   }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// PART 3: C/C++ Interactive Simulation
+// ──────────────────────────────────────────────────────────────────────────────
+
+import { OutputHandler, InputRequestHandler } from './terminalManager';
+
+export async function runCppInteractive(opts: {
+  code:     string;
+  language: 'c' | 'cpp';
+  onOutput: OutputHandler;
+  onInput:  InputRequestHandler;
+}): Promise<CompileResult> {
+  const { code, language, onOutput, onInput } = opts;
+
+  // 1. นับ input calls
+  const inputCount = countInputCalls(code, language);
+  onOutput(`▶ ${language === 'c' ? 'C' : 'C++'} · คอมไพล์กำลังเริ่ม...`, 'info');
+
+  // 2. เก็บ inputs ก่อนรัน (แสดง UX เหมือน interactive)
+  const collectedInputs: string[] = [];
+
+  if (inputCount > 0) {
+    onOutput(
+      `⌨️ โปรแกรมต้องการ ${inputCount} input — กรอกด้านล่าง`,
+      'info'
+    );
+
+    for (let i = 0; i < inputCount; i++) {
+      const val = await onInput('');
+      collectedInputs.push(val);
+    }
+  }
+
+  // 3. รัน Wandbox (หรือ Godbolt/Piston) พร้อม stdin
+  const stdin = collectedInputs.join('\n');
+  const result = await compileAndRun(code, language, stdin);
+
+  // 4. แสดงผลแบบ interleaved
+  if (result.compileError && result.compileError.trim()) {
+    onOutput('❌ Compile Error:', 'error');
+    stripAnsi(result.compileError)
+      .split('\n')
+      .filter(Boolean)
+      .forEach((line: string) => onOutput(line, 'error'));
+    return result;
+  }
+
+  // interleave stdout กับ inputs
+  displayInterleavedOutput(
+    stripAnsi(result.stdout),
+    collectedInputs,
+    onOutput
+  );
+
+  if (result.stderr.trim()) {
+    stripAnsi(result.stderr)
+      .split('\n')
+      .filter(Boolean)
+      .forEach((line: string) => onOutput(line, 'error'));
+  }
+
+  return result;
+}
+
+// แสดง output สลับกับ input ที่ผู้ใช้กรอก
+function displayInterleavedOutput(
+  stdout:  string,
+  inputs:  string[],
+  onOutput: OutputHandler
+): void {
+  const lines = stdout.split('\n');
+  let inputIdx = 0;
+
+  for (const line of lines) {
+    if (!line && inputIdx >= inputs.length) continue;
+    onOutput(line, 'output');
+
+    // ถ้าบรรทัดดูเหมือน prompt → inject input echo
+    const isPromptLine =
+      /[:?]\s*$/.test(line.trim()) ||
+      /กรอก|กรุณา|ใส่|enter|input/i.test(line);
+
+    if (isPromptLine && inputIdx < inputs.length) {
+      onOutput(inputs[inputIdx++], 'input-echo');
+    }
+  }
+}
+
+export function countInputCalls(
+  code: string, lang: 'c' | 'cpp'
+): number {
+  if (lang === 'c') {
+    return (code.match(
+      /\bscanf\s*\(|getchar\s*\(|fgets\s*\(|gets\s*\(/g
+    ) ?? []).length;
+  }
+  // นับ cin >> หลายตัวในบรรทัดเดียวด้วย
+  const cinMatches = code.match(/cin\s*>>/g) ?? [];
+  return cinMatches.length;
 }

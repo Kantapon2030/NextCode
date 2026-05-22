@@ -1,20 +1,31 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../store/appStore';
-import { db, deleteProjectData } from '../../storage/db';
+import { db, deleteProjectFromDB } from '../../storage/db';
 import { saveVFSFile, saveVFSAsset } from '../../storage/vfsHelpers';
 import { getTemplate, TEMPLATES } from '../../templates';
 import { toast } from '../shared/Toast';
 import { LoadingSpinner, SkeletonCard } from '../shared/LoadingSpinner';
-import WelcomeModal from '../modals/WelcomeModal';
 import NewProjectModal from '../modals/NewProjectModal';
 import SettingsModal from '../modals/SettingsModal';
 import {
   readDroppedItems, detectLanguage, isImage, isTextFile, getMimeType,
 } from '../../utils/folderImport';
 import {
+  getGitHubToken, fetchGitHubUser,
+} from '../../services/githubAuth';
+import {
+  getOrCreateGist, loadFromGist, saveToGist, mergeProjects,
+  saveProjectToLocal, loadLocalProjects, serializeProject
+} from '../../services/gistStorage';
+import {
+  getOrCreateDriveFile, loadFromDrive, saveToDrive
+} from '../../services/googleDriveStorage';
+import { GitHubLoginModal } from '../modals/GitHubLoginModal';
+import {
   Code2, Plus, Search, LogOut, Settings, Clock, Cloud, CloudOff, Loader2,
   Copy, Download, Trash2, FolderOpen, User, ChevronDown, X, Upload, FolderInput,
+  AlertCircle,
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
@@ -40,36 +51,153 @@ function relativeTime(ms: number): string {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { user, projects, setProjects, addProject, removeProject, logout, theme } = useAppStore();
+  const { user, accessToken, projects, setProjects, addProject, removeProject, logout, theme, supabaseUser, currentProject, resetWorkspace, setCurrentProject, setSyncStatus } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [showNew, setShowNew] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(false);
   const [avatarMenu, setAvatarMenu] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState('');
   const [isDragOver, setIsDragOver] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState('');
+  const [showGhLogin, setShowGhLogin] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
   const avatarRef = useRef<HTMLDivElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    async function load() {
+    async function init() {
       try {
-        const projs = await db.projects.orderBy('updated_at').reverse().toArray();
-        setProjects(projs as any);
+        if (accessToken) {
+          setSyncStatus('syncing');
+          try {
+            const fileId = await getOrCreateDriveFile(accessToken);
+            const data = await loadFromDrive(accessToken, fileId);
+
+            const localProjects = await loadLocalProjects();
+            const merged = mergeProjects(localProjects, data.projects || []);
+
+            const finalProjs = [];
+            for (const sp of merged) {
+              const p = await saveProjectToLocal(sp);
+              finalProjs.push(p);
+            }
+            
+            setProjects(finalProjs.sort((a, b) => b.updated_at - a.updated_at));
+            setSyncStatus('synced');
+            setSyncError(null);
+          } catch (e) {
+            console.error('Google Drive Cloud sync error:', e);
+            setSyncStatus('error');
+            const errMsg = e instanceof Error ? e.message : String(e);
+            setSyncError(errMsg);
+            const projs = await db.projects.orderBy('updated_at').reverse().toArray();
+            setProjects(projs as any);
+          }
+        } else {
+          const token = getGitHubToken();
+          if (token) {
+            setSyncStatus('syncing');
+            try {
+              await fetchGitHubUser(token);
+              const gistId = await getOrCreateGist(token);
+              const data = await loadFromGist(token, gistId);
+
+              const localProjects = await loadLocalProjects();
+              const merged = mergeProjects(localProjects, data.projects || []);
+
+              const finalProjs = [];
+              for (const sp of merged) {
+                const p = await saveProjectToLocal(sp);
+                finalProjs.push(p);
+              }
+              
+              setProjects(finalProjs.sort((a,b) => b.updated_at - a.updated_at));
+              setSyncStatus('synced');
+            } catch (e) {
+              console.error('GitHub Cloud sync error:', e);
+              setSyncStatus('error');
+              const projs = await db.projects.orderBy('updated_at').reverse().toArray();
+              setProjects(projs as any);
+            }
+          } else {
+            const projs = await db.projects.orderBy('updated_at').reverse().toArray();
+            setProjects(projs as any);
+          }
+        }
       } finally {
         setLoading(false);
       }
     }
-    load();
+    init();
 
-    // Check onboarding
+    // Check onboarding - auto bypass onboarding to skip api key and experience prompt
     const onboarded = localStorage.getItem('nextcode_onboarded');
-    if (!onboarded) setShowOnboarding(true);
-  }, []);
+    if (!onboarded) {
+      localStorage.setItem('nextcode_onboarded', '1');
+    }
+  }, [accessToken]);
+
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    if (projects.length === 0) return;
+
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(async () => {
+      if (accessToken) {
+        try {
+          setSyncStatus('syncing');
+          const fileId = localStorage.getItem('google_drive_file_id') || await getOrCreateDriveFile(accessToken);
+          
+          const serialized = [];
+          for (const p of projects) {
+            serialized.push(await serializeProject(p));
+          }
+
+          await saveToDrive(accessToken, fileId, {
+            version: 1,
+            projects: serialized,
+            updatedAt: Date.now(),
+          });
+          setSyncStatus('synced');
+          setSyncError(null);
+        } catch (e) {
+          console.error('Google Drive save error:', e);
+          setSyncStatus('error');
+          const errMsg = e instanceof Error ? e.message : String(e);
+          setSyncError(errMsg);
+        }
+      } else {
+        const token = getGitHubToken();
+        if (!token) return;
+        try {
+          const gistId = localStorage.getItem('gh_gist_id');
+          if (!gistId) return;
+          setSyncStatus('syncing');
+          
+          const serialized = [];
+          for (const p of projects) {
+            serialized.push(await serializeProject(p));
+          }
+
+          await saveToGist(token, gistId, {
+            version: 1,
+            projects: serialized,
+            updatedAt: Date.now(),
+          });
+          setSyncStatus('synced');
+        } catch (e) {
+          console.error('GitHub save error:', e);
+          setSyncStatus('error');
+        }
+      }
+    }, 3000);
+
+    return () => clearTimeout(saveTimer.current);
+  }, [projects, accessToken]);
 
   useEffect(() => {
     function close(e: MouseEvent) {
@@ -85,12 +213,35 @@ export default function Dashboard() {
     p.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  async function handleDelete(id: string) {
-    if (!confirm('ลบโปรเจกต์นี้หรือไม่? การกระทำนี้ไม่สามารถเลิกทำได้')) return;
-    await deleteProjectData(id);
-    removeProject(id);
-    toast('success', 'ลบโปรเจกต์แล้ว');
-  }
+  const handleDeleteProject = async (projectId: string, projectName: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const confirmed = window.confirm(
+      `ลบโปรเจกต์ "${projectName}"?\nไฟล์ทั้งหมดจะถูกลบถาวร ไม่สามารถกู้คืนได้`
+    );
+    if (!confirmed) return;
+
+    try {
+      await deleteProjectFromDB(projectId);
+
+      // (Optional) Call your Supabase API if needed here
+      // if (navigator.onLine && supabaseUser) { await deleteProjectFromSupabase(projectId); }
+
+      removeProject(projectId);
+
+      if (currentProject?.id === projectId) {
+        resetWorkspace();
+        setCurrentProject(null);
+        navigate('/dashboard');
+      }
+
+      toast('success', `ลบ "${projectName}" แล้ว`);
+    } catch (err) {
+      console.error('Delete project error:', err);
+      toast('error', err instanceof Error ? err.message : 'ลบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
+    }
+  };
 
   async function handleDuplicate(id: string) {
     const source = projects.find((p) => p.id === id);
@@ -257,9 +408,22 @@ export default function Dashboard() {
     navigate('/');
   }
 
+  function handleConnectGitHub() {
+    setShowGhLogin(true);
+  }
+
   const bg = theme === 'dark' ? 'bg-surface-900' : 'bg-zinc-50';
   const surface = theme === 'dark' ? 'bg-surface-800 border-border' : 'bg-white border-zinc-200';
   const navBg = theme === 'dark' ? 'bg-surface-950/80 border-border' : 'bg-white/80 border-zinc-200';
+
+  // สกัดลิงก์เปิดใช้งาน API
+  let apiEnableUrl = '';
+  if (syncError) {
+    const match = syncError.match(/https:\/\/console\.developers\.google\.com\/[^\s]*/);
+    if (match) {
+      apiEnableUrl = match[0];
+    }
+  }
 
   return (
     <div className={`${bg} min-h-screen flex flex-col`}>
@@ -313,7 +477,7 @@ export default function Dashboard() {
             className="flex items-center gap-2 p-1 hover:bg-surface-700 rounded-xl transition-colors"
           >
             {user?.avatar ? (
-              <img src={user.avatar} alt={user.name} className="w-8 h-8 rounded-full" />
+              <img src={user.avatar} alt={user.name} className="w-8 h-8 rounded-full" crossOrigin="anonymous" />
             ) : (
               <div className="w-8 h-8 rounded-full bg-primary-600 flex items-center justify-center">
                 <User className="w-4 h-4 text-white" />
@@ -327,6 +491,15 @@ export default function Dashboard() {
                 <p className="text-sm font-medium text-white truncate">{user?.name}</p>
                 <p className="text-xs text-zinc-500 truncate">{user?.email}</p>
               </div>
+              {!getGitHubToken() && (
+                <button
+                  onClick={() => { handleConnectGitHub(); setAvatarMenu(false); }}
+                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-zinc-300 hover:bg-surface-700 transition-colors border-b border-border"
+                >
+                  <Cloud className="w-4 h-4" />
+                  เชื่อมต่อ GitHub (Cloud)
+                </button>
+              )}
               <button
                 onClick={handleLogout}
                 className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-400 hover:bg-red-900/20 transition-colors"
@@ -340,6 +513,45 @@ export default function Dashboard() {
       </nav>
 
       <main className="flex-1 px-6 py-8 max-w-7xl mx-auto w-full">
+        {syncError && (
+          <div className="mb-6 p-4 rounded-xl border border-red-500/30 bg-red-950/20 text-zinc-300 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-slide-down">
+            <div className="flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+              <div>
+                <h4 className="font-semibold text-white text-sm">การเชื่อมต่อคลาวด์ขัดข้อง (Google Drive Sync Error)</h4>
+                <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
+                  {syncError.includes('Google Drive API has not been used')
+                    ? 'สิทธิ์การเข้าใช้งานคลาวด์ล้มเหลว เนื่องจากโครงการ Google Cloud ของคุณยังไม่ได้เปิดใช้บริการ Google Drive API'
+                    : syncError}
+                </p>
+                {apiEnableUrl && (
+                  <p className="text-xs text-zinc-500 mt-1">
+                    กรุณาคลิกปุ่ม "เปิดใช้งาน API" ด้านล่างเพื่อเปิดสิทธิ์การใช้งานของโครงการ จากนั้นรีเฟรชหน้านี้ครับ
+                  </p>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-3 shrink-0 self-end md:self-center">
+              {apiEnableUrl && (
+                <a
+                  href={apiEnableUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3.5 py-1.5 bg-primary-600 hover:bg-primary-500 text-white rounded-lg text-xs font-medium transition-colors shadow-glow-sm"
+                >
+                  เปิดใช้งาน API
+                </a>
+              )}
+              <button
+                onClick={() => setSyncError(null)}
+                className="p-1.5 hover:bg-surface-800 rounded-lg text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="flex items-baseline justify-between mb-4">
           <div>
             <h1 className="text-2xl font-bold text-white">โปรเจกต์ของฉัน</h1>
@@ -503,7 +715,7 @@ export default function Dashboard() {
                       <Download className="w-3.5 h-3.5" />
                     </button>
                     <button
-                      onClick={() => handleDelete(project.id)}
+                      onClick={(e) => handleDeleteProject(project.id, project.name, e)}
                       className="p-1.5 bg-red-900/30 hover:bg-red-900/50 text-red-400 rounded-lg transition-colors"
                       title="ลบ"
                     >
@@ -527,16 +739,17 @@ export default function Dashboard() {
         </div>
       </footer>
 
-      {showOnboarding && (
-        <WelcomeModal
-          onClose={() => {
-            setShowOnboarding(false);
-            localStorage.setItem('nextcode_onboarded', '1');
-          }}
-        />
-      )}
       {showNew && <NewProjectModal onClose={() => setShowNew(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showGhLogin && (
+        <GitHubLoginModal
+          onSuccess={() => {
+            setShowGhLogin(false);
+            window.location.reload();
+          }}
+          onSkip={() => setShowGhLogin(false)}
+        />
+      )}
     </div>
   );
 }

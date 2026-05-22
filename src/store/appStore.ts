@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { VFSState } from '../types';
+import type { VFSState } from '../types';
 import { setFileAtPath, setFolderAtPath, deleteAtPath, moveNode, buildFlatIndex, buildCompatibilityMaps } from '../storage/vfsHelpers';
+import type { SupabaseUser } from '../services/supabase';
 
 export interface ConsoleEntry {
   id: string;
@@ -12,7 +13,7 @@ export interface ConsoleEntry {
 export interface TerminalEntry {
   id: string;
   timestamp: number;
-  type: 'output' | 'error' | 'system';
+  type: 'output' | 'error' | 'system' | 'info' | 'warning' | 'stdin-echo' | 'input-echo';
   content: string;
 }
 
@@ -30,7 +31,7 @@ export interface Project {
   template: string;
   created_at: number;
   updated_at: number;
-  drive_folder_id?: string;
+  drive_folder_id?: string; // kept for backward compat
 }
 
 export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'offline';
@@ -47,6 +48,7 @@ export interface AIResponse {
 
 interface AppState {
   user: User | null;
+  supabaseUser: SupabaseUser | null;
   accessToken: string | null;
   tokenExpiry: number | null;
   userMode: UserMode;
@@ -73,6 +75,7 @@ interface AppState {
   showMultiTabBanner: boolean;
 
   setUser: (user: User | null) => void;
+  setSupabaseUser: (user: SupabaseUser | null) => void;
   setAccessToken: (token: string | null, expiry: number | null) => void;
   setUserMode: (mode: UserMode) => void;
   setProjects: (projects: Project[]) => void;
@@ -108,11 +111,14 @@ interface AppState {
   setFontSize: (size: number) => void;
   setShowMultiTabBanner: (show: boolean) => void;
   resetProjectState: () => void;
+  /** ล้าง workspace state ทั้งหมดเมื่อเปลี่ยนโปรเจกต์ */
+  resetWorkspace: () => void;
   logout: () => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
   user: null,
+  supabaseUser: null,
   accessToken: null,
   tokenExpiry: null,
   userMode: 'beginner',
@@ -139,11 +145,15 @@ export const useAppStore = create<AppState>((set) => ({
   showMultiTabBanner: false,
 
   setUser: (user) => set({ user }),
+  setSupabaseUser: (supabaseUser) => set({ supabaseUser }),
   setAccessToken: (accessToken, tokenExpiry) => set({ accessToken, tokenExpiry }),
   setUserMode: (userMode) => set({ userMode }),
   setProjects: (projects) => set({ projects }),
   addProject: (project) => set((s) => ({ projects: [project, ...s.projects] })),
-  removeProject: (id) => set((s) => ({ projects: s.projects.filter((p) => p.id !== id) })),
+  removeProject: (id) => set((s) => ({
+    projects: s.projects.filter((p) => p.id !== id),
+    currentProject: s.currentProject?.id === id ? null : s.currentProject,
+  })),
   updateProject: (id, updates) =>
     set((s) => ({
       projects: s.projects.map((p) => (p.id === id ? { ...p, ...updates } : p)),
@@ -263,9 +273,24 @@ export const useAppStore = create<AppState>((set) => ({
       vfs: { tree: {}, flatIndex: {}, files: {}, assets: {} },
       currentProject: null,
     }),
+  resetWorkspace: () =>
+    set({
+      openTabs: [],
+      activeTab: null,
+      activeLanguage: 'html',
+      vfs: { tree: {}, flatIndex: {}, files: {}, assets: {} },
+      terminalOutput: [],
+      consoleLogs: [],
+      consoleErrors: [],
+      aiResponse: null,
+      saveStatus: 'saved',
+      syncStatus: 'local',
+      previewMode: 'web',
+    }),
   logout: () =>
     set({
       user: null,
+      supabaseUser: null,
       accessToken: null,
       tokenExpiry: null,
       currentProject: null,

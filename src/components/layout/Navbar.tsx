@@ -7,11 +7,12 @@ import { toast } from '../shared/Toast';
 import SettingsModal from '../modals/SettingsModal';
 import {
   Code2, Save, Bot, Keyboard, Settings, User, ChevronDown,
-  LogOut, LayoutDashboard, Download, Package, Loader2, CheckCircle
+  LogOut, LayoutDashboard, Download, Package, Loader2, CheckCircle, Cloud, CloudOff
 } from 'lucide-react';
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { db } from '../../storage/db';
+import { getGitHubToken } from '../../services/githubAuth';
 
 interface Props {
   onSave: () => void;
@@ -21,8 +22,8 @@ interface Props {
 export function Navbar({ onSave, onToggleCommandPalette }: Props) {
   const navigate = useNavigate();
   const {
-    user, currentProject, saveStatus, theme,
-    aiPanelOpen, setAIPanelOpen, logout, vfs
+    user, currentProject, saveStatus, syncStatus, theme,
+    aiPanelOpen, setAIPanelOpen, logout, vfs, accessToken
   } = useAppStore();
   const [showSettings, setShowSettings] = useState(false);
   const [showProjectMenu, setShowProjectMenu] = useState(false);
@@ -138,6 +139,15 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
 
         <div className="flex-1" />
 
+        {(getGitHubToken() || accessToken) && (
+          <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-400" title="สถานะ Cloud Sync">
+            {syncStatus === 'synced' && <><Cloud className="w-4 h-4 text-green-400" /> <span className="hidden sm:inline">บันทึกคลาวด์แล้ว</span></>}
+            {syncStatus === 'syncing' && <><Loader2 className="w-4 h-4 animate-spin text-blue-400" /> <span className="hidden sm:inline">กำลัง sync...</span></>}
+            {syncStatus === 'local' && <><CloudOff className="w-4 h-4 text-yellow-400" /> <span className="hidden sm:inline">เฉพาะเครื่องนี้</span></>}
+            {syncStatus === 'error' && <><CloudOff className="w-4 h-4 text-red-400" /> <span className="hidden sm:inline">Sync ไม่สำเร็จ</span></>}
+          </div>
+        )}
+
         {/* Save button */}
         <button
           id="btn-save"
@@ -222,7 +232,7 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
             className="flex items-center gap-1 p-1 hover:bg-surface-800 rounded-lg transition-colors"
           >
             {user?.avatar ? (
-              <img src={user.avatar} alt={user.name} className="w-7 h-7 rounded-full" />
+              <img src={user.avatar} alt={user.name} className="w-7 h-7 rounded-full" crossOrigin="anonymous" />
             ) : (
               <div className="w-7 h-7 rounded-full bg-primary-600 flex items-center justify-center">
                 <User className="w-3.5 h-3.5 text-white" />

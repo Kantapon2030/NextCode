@@ -247,3 +247,211 @@ body {
 .animate-slide-up { animation: slideUp  0.3s ease-out both; }
 .animate-slide-down { animation: slideDown 0.25s ease-out both; }
 
+/* ── Terminal Pane Layout ── */
+.terminal-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #0a0a0a;
+  font-family: 'JetBrains Mono','Fira Code',
+               'Cascadia Code', monospace;
+}
+
+.terminal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: #111;
+  border-bottom: 1px solid #222;
+  min-height: 36px;
+  flex-shrink: 0;
+}
+
+.terminal-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: #a1a1aa;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}
+
+.terminal-badge-waiting {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: rgba(99,102,241,.15);
+  color: #818cf8;
+  animation: terminal-pulse 1.2s ease infinite;
+}
+
+@keyframes terminal-pulse {
+  0%,100% { opacity: 1; }
+  50%      { opacity: .4; }
+}
+
+/* ── Buttons ── */
+.btn-terminal-run {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  background: #22c55e;
+  color: #000;
+  border: none;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity .15s;
+}
+.btn-terminal-run:hover { opacity: .85; }
+
+.btn-terminal-stop {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  background: #ef4444;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-terminal-ghost {
+  background: transparent;
+  border: none;
+  color: #52525b;
+  cursor: pointer;
+  padding: 3px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+}
+.btn-terminal-ghost:hover:not(:disabled) {
+  color: #a1a1aa;
+  background: #1a1a1a;
+}
+.btn-terminal-ghost:disabled { opacity: .3; cursor: default; }
+
+/* ── Output Area ── */
+.terminal-output {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 4px;
+  cursor: text;
+}
+
+.terminal-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 12px;
+  color: #3f3f46;
+  font-size: 12px;
+}
+.terminal-empty-hint {
+  font-size: 11px;
+  color: #27272a;
+}
+
+/* ── Terminal Lines ── */
+.term-line {
+  display: flex;
+  align-items: baseline;
+  padding: 1px 8px;
+  line-height: 1.55;
+}
+.term-line pre {
+  font-family: inherit;
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin: 0;
+}
+
+.term-output     pre { color: #e4e4e7; }
+.term-error      pre { color: #f87171; }
+.term-info       pre { color: #60a5fa; font-size: 12px; }
+.term-warning    pre { color: #fbbf24; }
+.term-stdin      pre { color: #34d399; }
+
+/* Input echo — ค่าที่ผู้ใช้พิมพ์ */
+.term-input-echo {
+  background: rgba(99,102,241,.06);
+  border-left: 2px solid #6366f1;
+  margin: 1px 0;
+}
+.term-input-echo pre { color: #a5b4fc; }
+.term-input-prefix  { color: #6366f1; margin-right: 4px; }
+
+/* ── Interactive Input Field ── */
+.terminal-input-row {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  margin: 2px 0;
+  background: rgba(99,102,241,.08);
+  border-left: 3px solid #6366f1;
+  gap: 6px;
+  animation: input-appear .15s ease;
+}
+@keyframes input-appear {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.terminal-inline-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid rgba(99,102,241,.5);
+  color: #c7d2fe;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+  padding: 2px 4px;
+  caret-color: #6366f1;
+  min-width: 0;
+}
+.terminal-inline-input::placeholder {
+  color: #3f3f46;
+  font-size: 12px;
+}
+.terminal-inline-input:focus {
+  border-bottom-color: #6366f1;
+}
+
+.terminal-input-enter {
+  background: #6366f1;
+  border: none;
+  border-radius: 4px;
+  color: #fff;
+  font-size: 13px;
+  padding: 2px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background .15s;
+}
+.terminal-input-enter:hover { background: #4f46e5; }
+
+/* ── Spinner ── */
+.terminal-spinner {
+  display: flex;
+  gap: 3px;
+  padding: 4px 10px;
+}
+.spin-dot {
+  color: #6366f1;
+  font-size: 18px;
+  animation: spin-bounce .8s ease infinite;
+}
+.spin-dot:nth-child(2) { animation-delay: .15s; }
+.spin-dot:nth-child(3) { animation-delay: .3s; }
+@keyframes spin-bounce {
+  0%,80%,100% { opacity: .2; transform: translateY(0); }
+  40%          { opacity: 1;  transform: translateY(-4px); }
+}

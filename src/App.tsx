@@ -172,6 +172,14 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* Floating Version Display */}
+        <div 
+          className="fixed bottom-3 left-3 z-[9999] text-[10px] font-mono text-zinc-500/80 select-none bg-surface-950/40 backdrop-blur-sm px-2 py-0.5 rounded border border-border/20 pointer-events-none"
+          title="Nextcode IDE Version"
+        >
+          v1.0.1
+        </div>
       </div>
     </BrowserRouter>
   );

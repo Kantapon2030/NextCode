@@ -65,6 +65,15 @@ export interface CustomSnippet {
   createdAt: number;
 }
 
+export interface DeployHistory {
+  id?: number;
+  project_id: string;
+  url: string;
+  deploy_id: string;
+  provider: 'netlify' | 'vercel';
+  deployed_at: number;
+}
+
 export class NextcodeDB extends Dexie {
   projects!: Table<Project>;
   files!: Table<ProjectFile>;
@@ -73,6 +82,7 @@ export class NextcodeDB extends Dexie {
   settings!: Table<Setting>;
   terminal_history!: Table<TerminalHistoryEntry>;
   custom_snippets!: Table<CustomSnippet>;
+  deploy_history!: Table<DeployHistory>;
 
   constructor() {
     super('NextcodeIDE_v1');
@@ -104,10 +114,12 @@ export class NextcodeDB extends Dexie {
       settings: '&key',
       terminal_history: '++id, project_id, timestamp, type',
       custom_snippets: '++id, trigger, language, createdAt',
-    }).upgrade(async tx => {
-      // 1. Migrate files
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }).upgrade(async (tx: any) => {
       const oldFiles = await tx.table('files').toArray();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const tempRecords: any[] = [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       for (const f of oldFiles) {
         const path = f.filename || f.path || '';
         const parts = path.split('/').filter(Boolean);
@@ -127,8 +139,8 @@ export class NextcodeDB extends Dexie {
         });
       }
 
-      // 2. Migrate assets to filesTemp
       const oldAssets = await tx.table('assets').toArray();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       for (const a of oldAssets) {
         const path = a.name || '';
         const parts = path.split('/').filter(Boolean);
@@ -160,9 +172,21 @@ export class NextcodeDB extends Dexie {
       settings: '&key',
       terminal_history: '++id, project_id, timestamp, type',
       custom_snippets: '++id, trigger, language, createdAt',
-    }).upgrade(async tx => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    }).upgrade(async (tx: any) => {
       const tempFiles = await tx.table('filesTemp').toArray();
       await tx.table('files').bulkAdd(tempFiles);
+    });
+
+    // v5: Add deploy_history table
+    this.version(5).stores({
+      projects: '&id, name, language, template, created_at, updated_at, drive_folder_id',
+      files: '&[project_id+path], project_id, path, name, parent_path, type, drive_file_id, is_dirty, updated_at, [project_id+parent_path]',
+      snapshots: '++id, project_id, timestamp, type',
+      settings: '&key',
+      terminal_history: '++id, project_id, timestamp, type',
+      custom_snippets: '++id, trigger, language, createdAt',
+      deploy_history: '++id, project_id, provider, deployed_at',
     });
   }
 }
@@ -171,7 +195,7 @@ export const db = new NextcodeDB();
 
 // Handle schema/version/upgrade errors by deleting database and reloading
 db.open().catch(async (err) => {
-  console.error("Failed to open IndexedDB:", err);
+  console.error('Failed to open IndexedDB:', err);
   if (
     err.name === 'VersionError' ||
     err.name === 'UpgradeError' ||
@@ -179,12 +203,12 @@ db.open().catch(async (err) => {
     err.message?.includes('Version') ||
     err.message?.includes('upgrade')
   ) {
-    console.warn("Schema mismatch or version error. Deleting database to recover...");
+    console.warn('Schema mismatch or version error. Deleting database to recover...');
     try {
       await Dexie.delete('NextcodeIDE_v1');
       window.location.reload();
     } catch (deleteErr) {
-      console.error("Failed to delete database:", deleteErr);
+      console.error('Failed to delete database:', deleteErr);
     }
   }
 });
@@ -210,10 +234,50 @@ export async function saveFile(file: ProjectFile): Promise<void> {
   await db.files.put(file);
 }
 
-export async function deleteProjectData(projectId: string): Promise<void> {
-  await db.files.where('project_id').equals(projectId).delete();
-  await db.assets.where('project_id').equals(projectId).delete();
-  await db.snapshots.where('project_id').equals(projectId).delete();
-  await db.terminal_history.where('project_id').equals(projectId).delete();
+// ──────────────────────────────────────────────────────────────────────────────
+// BUG 3 FIX: deleteProjectData ใช้ compound key [project_id+path] ถูกต้อง
+// ข้อสำคัญ: primary key ของ files คือ [project_id+path]
+// ต้องใช้ where('project_id').equals() ซึ่ง Dexie รองรับ secondary index
+// ──────────────────────────────────────────────────────────────────────────────
+
+export async function deleteProjectFiles(projectId: string): Promise<void> {
+  const allFiles = await db.files
+    .where('[project_id+path]')
+    .between(
+      [projectId, Dexie.minKey],
+      [projectId, Dexie.maxKey]
+    )
+    .toArray();
+
+  await Promise.all(
+    allFiles.map(f =>
+      db.files
+        .where('[project_id+path]')
+        .equals([f.project_id, f.path])
+        .delete()
+    )
+  );
+}
+
+export async function deleteProjectSnapshots(projectId: string): Promise<void> {
+  await db.snapshots
+    .where('project_id')
+    .equals(projectId)
+    .delete();
+}
+
+export async function deleteProjectFromDB(projectId: string): Promise<void> {
+  await deleteProjectFiles(projectId);
+  await deleteProjectSnapshots(projectId);
+  if (db.terminal_history) {
+    await db.terminal_history.where('project_id').equals(projectId).delete();
+  }
   await db.projects.delete(projectId);
+}
+
+/** ลบ deploy history ของโปรเจกต์ (ใช้แยกเพราะไม่อยู่ใน transaction เดียวกัน) */
+export async function deleteProjectDeployHistory(projectId: string): Promise<void> {
+  if (db.deploy_history) {
+    await db.deploy_history.where('project_id').equals(projectId).delete();
+  }
 }

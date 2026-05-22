@@ -65,6 +65,7 @@ export function AIPanel({ onApplyFix }: Props) {
   const [errorType, setErrorType]           = useState<
     'rate_limit' | 'invalid_key' | 'network' | null
   >(null);
+  const [rawErrorDetails, setRawErrorDetails] = useState<string | null>(null);
 
   // เก็บ pending request ไว้ retry
   const pendingRef = useRef<{
@@ -82,12 +83,15 @@ export function AIPanel({ onApplyFix }: Props) {
         );
         if (enc) {
           const plain = await decryptApiKey(enc.iv, enc.ciphertext, user.id);
-          if (plain?.startsWith('AIza')) {
+          const trimmed = plain?.trim();
+          if (trimmed) {
             setUsingBuiltinKey(false);
-            return plain;
+            return trimmed;
           }
         }
-      } catch { /* fallthrough */ }
+      } catch (err) {
+        console.error('Failed to resolve custom API key:', err);
+      }
     }
     setUsingBuiltinKey(true);
     return BUILTIN_KEY;
@@ -105,6 +109,7 @@ export function AIPanel({ onApplyFix }: Props) {
     setStatusMsg('');
 
     try {
+      setRawErrorDetails(null);
       const result = await callGemini(
         { apiKey, userInput: input, mode: aiMode, files, errors, includeWholeFile },
         (attempt, waitSec) => {
@@ -118,10 +123,11 @@ export function AIPanel({ onApplyFix }: Props) {
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setStatusMsg('');
-      if (msg === 'RATE_LIMIT') {
+      setRawErrorDetails(msg);
+      if (msg.includes('Rate limit') || msg.includes('429')) {
         setErrorType('rate_limit');
         toast('warning', '⏳ Rate limit เต็ม — ใช้ API key ของตัวเองเพื่อ quota มากขึ้น');
-      } else if (msg === 'API_KEY_INVALID') {
+      } else if (msg.startsWith('API_KEY_INVALID')) {
         setErrorType('invalid_key');
         toast('error', '❌ API Key ไม่ถูกต้อง');
       } else if (msg === 'EMPTY_RESPONSE') {
@@ -129,7 +135,7 @@ export function AIPanel({ onApplyFix }: Props) {
         toast('warning', '⚠ AI ไม่มีผลลัพธ์ กรุณาลองใหม่');
       } else {
         setErrorType('network');
-        toast('error', '❌ เชื่อมต่อ Gemini ไม่ได้ ตรวจสอบอินเทอร์เน็ต');
+        toast('error', '❌ เกิดข้อผิดพลาดในการเชื่อมต่อ Gemini');
       }
     } finally {
       setAILoading(false);
@@ -245,6 +251,11 @@ export function AIPanel({ onApplyFix }: Props) {
                 <p className="text-orange-500 mt-0.5">
                   API key ถึงขีดจำกัดคำขอต่อนาที ระบบได้ retry อัตโนมัติ 3 ครั้งแล้ว
                 </p>
+                {rawErrorDetails && (
+                  <p className="text-[10px] text-orange-400/80 font-mono bg-orange-950/40 p-2 rounded border border-orange-900/40 mt-1.5 whitespace-pre-wrap">
+                    รายละเอียด: {rawErrorDetails}
+                  </p>
+                )}
               </div>
             </div>
             <div className="flex gap-2">
@@ -267,22 +278,38 @@ export function AIPanel({ onApplyFix }: Props) {
         )}
 
         {errorType === 'invalid_key' && !aiLoading && (
-          <div className="flex items-start gap-2 p-3 bg-red-900/20 border border-red-700/30 rounded-xl text-xs text-red-300">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>API Key ไม่ถูกต้อง — ตรวจสอบใน Settings ⚙</span>
+          <div className="flex flex-col gap-2 p-3 bg-red-900/20 border border-red-700/30 rounded-xl text-xs text-red-300">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>API Key ไม่ถูกต้อง — ตรวจสอบใน Settings ⚙</span>
+            </div>
+            {rawErrorDetails && (
+              <p className="text-[10px] text-red-400/80 font-mono bg-red-950/40 p-2 rounded border border-red-900/40 whitespace-pre-wrap">
+                รายละเอียด: {rawErrorDetails.replace('API_KEY_INVALID: ', '')}
+              </p>
+            )}
           </div>
         )}
 
         {errorType === 'network' && !aiLoading && (
-          <div className="flex items-center gap-2 p-3 bg-red-900/20 border border-red-700/30 rounded-xl text-xs text-red-300">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span className="flex-1">เชื่อมต่อไม่ได้</span>
-            <button
-              onClick={handleRetry}
-              className="flex items-center gap-1 px-2 py-1 bg-surface-700 hover:bg-surface-600 text-zinc-300 rounded-lg transition-colors"
-            >
-              <RefreshCw className="w-3 h-3" /> Retry
-            </button>
+          <div className="p-3 bg-red-900/20 border border-red-700/30 rounded-xl space-y-2">
+            <div className="flex items-start gap-2 text-xs text-red-300">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <div className="space-y-1 flex-1">
+                <p className="font-medium">เชื่อมต่อกับ Gemini ไม่สำเร็จ</p>
+                {rawErrorDetails && (
+                  <p className="text-[10px] text-red-400/80 font-mono bg-red-950/40 p-2 rounded border border-red-900/40 whitespace-pre-wrap">
+                    รายละเอียด: {rawErrorDetails}
+                  </p>
+                )}
+              </div>
+              <button
+                onClick={handleRetry}
+                className="flex items-center gap-1 px-2 py-1 bg-surface-700 hover:bg-surface-600 text-zinc-300 rounded-lg transition-colors text-xs shrink-0 self-start animate-pulse"
+              >
+                <RefreshCw className="w-3.5 h-3.5" /> Retry
+              </button>
+            </div>
           </div>
         )}
 

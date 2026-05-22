@@ -17,126 +17,158 @@ const HTML_TEMPLATE: Template = {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>โปรเจกต์ของฉัน</title>
+  <title>Nextcode Web Project</title>
+  <link rel="stylesheet" href="style.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;600;700&family=Outfit:wght@400;600;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --background: #0b0f19;
+      --surface: rgba(255, 255, 255, 0.03);
+      --border: rgba(255, 255, 255, 0.08);
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+    }
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: 'Sarabun', 'Outfit', sans-serif;
+      background-color: var(--background);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Ambient background lights */
+    .glow-orb {
+      position: absolute;
+      width: 400px;
+      height: 400px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(99, 102, 241, 0.15) 0%, rgba(0, 0, 0, 0) 70%);
+      top: -10%;
+      right: -10%;
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .glow-orb-2 {
+      position: absolute;
+      width: 500px;
+      height: 500px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(168, 85, 247, 0.1) 0%, rgba(0, 0, 0, 0) 70%);
+      bottom: -15%;
+      left: -15%;
+      z-index: 1;
+      pointer-events: none;
+    }
+    
+    .card {
+      background: var(--surface);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      padding: 3rem;
+      border-radius: 24px;
+      max-width: 480px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.3), 
+                  0 0 80px rgba(99, 102, 241, 0.05);
+      z-index: 2;
+      transition: transform 0.3s ease, border-color 0.3s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-4px);
+      border-color: rgba(99, 102, 241, 0.25);
+    }
+    
+    .icon {
+      font-size: 3rem;
+      margin-bottom: 1.5rem;
+      display: inline-block;
+      animation: float 3s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-8px); }
+    }
+    
+    h1 {
+      font-family: 'Outfit', 'Sarabun', sans-serif;
+      font-size: 2.25rem;
+      font-weight: 800;
+      margin-bottom: 0.75rem;
+      background: linear-gradient(135deg, #a5b4fc 0%, #6366f1 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.025em;
+    }
+    
+    p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      line-height: 1.6;
+      margin-bottom: 2rem;
+    }
+    
+    .btn {
+      display: inline-block;
+      width: 100%;
+      padding: 0.875rem 1.75rem;
+      background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+      color: white;
+      text-decoration: none;
+      font-weight: 600;
+      border-radius: 12px;
+      transition: all 0.2s ease;
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+    }
+    
+    .btn:hover {
+      background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%);
+      box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+      transform: scale(1.01);
+    }
+
+    .btn:active {
+      transform: scale(0.99);
+    }
+  </style>
 </head>
 <body>
-  <header class="header">
-    <div class="container">
-      <h1>ยินดีต้อนรับ! 👋</h1>
-      <p>เริ่มสร้างเว็บไซต์สวยๆ ได้เลย</p>
-    </div>
-  </header>
+  <div class="glow-orb"></div>
+  <div class="glow-orb-2"></div>
 
-  <main class="container">
-    <section class="hero">
-      <h2>เว็บไซต์ของฉัน</h2>
-      <p>แก้ไขโค้ดทางซ้าย แล้วดูผลลัพธ์ที่นี่</p>
-      <button id="btn-hello" onclick="sayHello()">คลิกฉัน!</button>
-    </section>
-  </main>
-
+  <div class="card">
+    <div class="icon">✨</div>
+    <h1>Nextcode IDE</h1>
+    <p>ยินดีต้อนรับสู่เว็บโปรเจกต์ของคุณ หน้าเว็บนี้เขียนสไตล์ในตัวทั้งหมดแบบเบ็ดเสร็จในไฟล์เดียว ลองแก้ไขโค้ดเพื่อเริ่มสร้างสรรค์ได้เลย!</p>
+    <button class="btn" onclick="alert('ยินดีต้อนรับสู่ Nextcode! 🚀')">เริ่มต้นใช้งาน</button>
+  </div>
+  
   <script src="script.js"></script>
 </body>
 </html>`,
-    'style.css': `/* รีเซ็ต CSS พื้นฐาน */
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-body {
-  font-family: 'Sarabun', sans-serif;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  min-height: 100vh;
-  color: #333;
-}
-
-.container {
-  max-width: 900px;
-  margin: 0 auto;
-  padding: 0 20px;
-}
-
-.header {
-  background: rgba(255,255,255,0.1);
-  backdrop-filter: blur(10px);
-  padding: 20px 0;
-  color: white;
-  text-align: center;
-}
-
-.header h1 {
-  font-size: 2.5rem;
-  font-weight: 700;
-  margin-bottom: 8px;
-}
-
-.header p {
-  font-size: 1.1rem;
-  opacity: 0.9;
-}
-
-.hero {
-  background: white;
-  border-radius: 16px;
-  padding: 48px;
-  margin: 40px auto;
-  text-align: center;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.2);
-}
-
-.hero h2 {
-  font-size: 2rem;
-  color: #4a5568;
-  margin-bottom: 16px;
-}
-
-.hero p {
-  font-size: 1.1rem;
-  color: #718096;
-  margin-bottom: 32px;
-}
-
-button {
-  background: linear-gradient(135deg, #667eea, #764ba2);
-  color: white;
-  border: none;
-  padding: 14px 36px;
-  border-radius: 50px;
-  font-size: 1rem;
-  font-family: 'Sarabun', sans-serif;
-  cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
-  box-shadow: 0 4px 15px rgba(102,126,234,0.4);
-}
-
-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(102,126,234,0.5);
-}
-
-button:active {
-  transform: translateY(0);
-}`,
-    'script.js': `// สวัสดีโลก! เริ่มเขียน JavaScript ได้เลย
-console.log('โปรเจกต์พร้อมแล้ว!');
-
-function sayHello() {
-  const messages = [
-    'สวัสดีครับ! 😊',
-    'ยินดีต้อนรับ! 🎉',
-    'โค้ดสนุกนะ! 💻',
-    'เก่งมากเลย! 🌟',
-  ];
-  const msg = messages[Math.floor(Math.random() * messages.length)];
-  alert(msg);
-}
-`,
+    'style.css': `/* เขียนสไตล์ CSS ของคุณที่นี่ */`,
+    'script.js': `// เขียนโค้ด JavaScript ของคุณที่นี่`,
   },
 };
 
@@ -230,11 +262,15 @@ const BLANK_TEMPLATE: Template = {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>โปรเจกต์ใหม่</title>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
-  <!-- เริ่มเขียนโค้ดได้เลย -->
+
+  <script src="script.js"></script>
 </body>
 </html>`,
+    'style.css': `/* เขียนสไตล์ CSS ของคุณที่นี่ */`,
+    'script.js': `// เขียนโค้ด JavaScript ของคุณที่นี่`,
   },
 };
 

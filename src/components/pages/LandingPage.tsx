@@ -21,7 +21,7 @@ declare global {
 }
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '';
-const SCOPES = 'openid profile email';
+const SCOPES = 'openid profile email https://www.googleapis.com/auth/drive.file';
 
 const features = [
   {
@@ -58,6 +58,10 @@ export default function LandingPage() {
     script.src = 'https://accounts.google.com/gsi/client';
     script.async = true;
     script.onload = initTokenClient;
+    script.onerror = (e) => {
+      console.error('Failed to load Google Sign-In script:', e);
+      setError('ไม่สามารถโหลดไลบรารี Google Sign-In ได้ (กรุณาเช็กการเชื่อมต่ออินเทอร์เน็ตหรือ Adblocker)');
+    };
     document.head.appendChild(script);
   }, []);
 
@@ -68,7 +72,8 @@ export default function LandingPage() {
       scope: SCOPES,
       callback: async (resp) => {
         if (resp.error || !resp.access_token) {
-          setError('ไม่สามารถเข้าสู่ระบบได้ กรุณาลองใหม่');
+          console.error('Google OAuth callback error response:', resp);
+          setError(`ไม่สามารถเข้าสู่ระบบได้ (${resp.error || 'ไม่มี access token'})`);
           setLoading(false);
           return;
         }
@@ -86,8 +91,9 @@ export default function LandingPage() {
           saveAuthToLocalStorage(userInfo);
           setUser({ id: info.id, name: info.name, email: info.email, avatar: info.picture });
           setAccessToken(resp.access_token, expiry_time);
-        } catch {
-          setError('เกิดข้อผิดพลาดในการเข้าสู่ระบบ');
+        } catch (err) {
+          console.error('Google OAuth fetch user info error:', err);
+          setError('เกิดข้อผิดพลาดในการดึงข้อมูลโปรไฟล์ผู้ใช้');
         } finally {
           setLoading(false);
         }

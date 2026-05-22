@@ -66,16 +66,27 @@ export function MonacoWrapper({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [markers]);
 
-  // ── onMount ──────────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  function handleEditorDidMount(editor: any, monaco: any) {
-    editorRef.current  = editor;
-    monacoRef.current  = monaco;
-
-    // Keyboard shortcuts
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS,  onSave);
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, onRun);
-    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyB,  onToggleAI);
+    // ── Use refs to avoid stale closures in Monaco commands ──
+    const onSaveRef = useRef(onSave);
+    const onRunRef = useRef(onRun);
+    const onToggleAIRef = useRef(onToggleAI);
+  
+    useEffect(() => {
+      onSaveRef.current = onSave;
+      onRunRef.current = onRun;
+      onToggleAIRef.current = onToggleAI;
+    }, [onSave, onRun, onToggleAI]);
+  
+    // ── onMount ──────────────────────────────────────────────────
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function handleEditorDidMount(editor: any, monaco: any) {
+      editorRef.current  = editor;
+      monacoRef.current  = monaco;
+  
+      // Keyboard shortcuts
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => onSaveRef.current());
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => onRunRef.current());
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyB, () => onToggleAIRef.current());
 
     // Cursor tracking
     editor.onDidChangeCursorPosition(

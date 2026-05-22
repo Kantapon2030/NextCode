@@ -60,4 +60,5 @@ export async function fetchUserInfo(accessToken: string): Promise<{
 export function clearAuthFromLocalStorage(): void {
   const keys = ['access_token', 'expiry_time', 'user_id', 'user_name', 'user_email', 'user_avatar'];
   keys.forEach((k) => localStorage.removeItem(LS_PREFIX + k));
+  localStorage.removeItem('google_drive_file_id');
 }
