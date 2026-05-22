@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAppStore } from '../../store/appStore';
+import { useAppStore, Project } from '../../store/appStore';
 import { db, deleteProjectFromDB } from '../../storage/db';
 import { saveVFSFile, saveVFSAsset } from '../../storage/vfsHelpers';
 import { getTemplate, TEMPLATES } from '../../templates';
@@ -16,7 +16,7 @@ import {
 } from '../../services/githubAuth';
 import {
   getOrCreateGist, loadFromGist, saveToGist, mergeProjects,
-  saveProjectToLocal, loadLocalProjects, serializeProject
+  saveProjectToLocal, loadLocalProjects, serializeProject, areProjectListsEqual
 } from '../../services/gistStorage';
 import {
   getOrCreateDriveFile, loadFromDrive, saveToDrive
@@ -68,6 +68,65 @@ export default function Dashboard() {
   const avatarRef = useRef<HTMLDivElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const syncProjectsToCloud = async (targetProjects: Project[]) => {
+    // ล้าง Timer ค้างของ Auto-save เพื่อประหยัด API ป้องกันการเซฟซ้ำซ้อน
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+    }
+    
+    if (accessToken) {
+      try {
+        setSyncStatus('syncing');
+        const fileId = localStorage.getItem('google_drive_file_id') || await getOrCreateDriveFile(accessToken);
+        
+        const serialized = [];
+        for (const p of targetProjects) {
+          serialized.push(await serializeProject(p));
+        }
+
+        await saveToDrive(accessToken, fileId, {
+          version: 1,
+          projects: serialized,
+          updatedAt: Date.now(),
+        });
+        setSyncStatus('synced');
+        setSyncError(null);
+        localStorage.setItem('nextcode_last_sync_time', Date.now().toString());
+      } catch (e) {
+        console.error('Google Drive save error:', e);
+        setSyncStatus('error');
+        const errMsg = e instanceof Error ? e.message : String(e);
+        setSyncError(errMsg);
+      }
+    } else {
+      const token = getGitHubToken();
+      if (!token) return;
+      try {
+        const gistId = localStorage.getItem('gh_gist_id');
+        if (!gistId) return;
+        setSyncStatus('syncing');
+        
+        const serialized = [];
+        for (const p of targetProjects) {
+          serialized.push(await serializeProject(p));
+        }
+
+        await saveToGist(token, gistId, {
+          version: 1,
+          projects: serialized,
+          updatedAt: Date.now(),
+        });
+        setSyncStatus('synced');
+        localStorage.setItem('nextcode_last_sync_time', Date.now().toString());
+      } catch (e) {
+        console.error('GitHub save error:', e);
+        setSyncStatus('error');
+      }
+    }
+  };
+
   useEffect(() => {
     async function init() {
       try {
@@ -78,7 +137,8 @@ export default function Dashboard() {
             const data = await loadFromDrive(accessToken, fileId);
 
             const localProjects = await loadLocalProjects();
-            const merged = mergeProjects(localProjects, data.projects || []);
+            const localLastSyncTime = parseInt(localStorage.getItem('nextcode_last_sync_time') || '0', 10);
+            const merged = mergeProjects(localProjects, data.projects || [], localLastSyncTime, data.updatedAt || 0);
 
             const finalProjs = [];
             for (const sp of merged) {
@@ -89,6 +149,23 @@ export default function Dashboard() {
             setProjects(finalProjs.sort((a, b) => b.updated_at - a.updated_at));
             setSyncStatus('synced');
             setSyncError(null);
+
+            // เช็กว่ามีโปรเจกต์ที่ต้องอัปเดตขึ้น Cloud ไหม (เมื่อมีความต่างระหว่าง merged กับ data.projects)
+            const cloudProjects = data.projects || [];
+            const isSynced = areProjectListsEqual(merged, cloudProjects);
+            localStorage.setItem('nextcode_last_sync_time', Date.now().toString());
+
+            if (!isSynced) {
+              const mappedProjects = merged.map(p => ({
+                id: p.id,
+                name: p.name,
+                language: p.language as any,
+                template: p.template,
+                created_at: p.createdAt,
+                updated_at: p.updatedAt,
+              }));
+              await syncProjectsToCloud(mappedProjects);
+            }
           } catch (e) {
             console.error('Google Drive Cloud sync error:', e);
             setSyncStatus('error');
@@ -107,7 +184,8 @@ export default function Dashboard() {
               const data = await loadFromGist(token, gistId);
 
               const localProjects = await loadLocalProjects();
-              const merged = mergeProjects(localProjects, data.projects || []);
+              const localLastSyncTime = parseInt(localStorage.getItem('nextcode_last_sync_time') || '0', 10);
+              const merged = mergeProjects(localProjects, data.projects || [], localLastSyncTime, data.updatedAt || 0);
 
               const finalProjs = [];
               for (const sp of merged) {
@@ -117,6 +195,23 @@ export default function Dashboard() {
               
               setProjects(finalProjs.sort((a,b) => b.updated_at - a.updated_at));
               setSyncStatus('synced');
+
+              // เช็กว่ามีโปรเจกต์ที่ต้องอัปเดตขึ้น Cloud ไหม
+              const cloudProjects = data.projects || [];
+              const isSynced = areProjectListsEqual(merged, cloudProjects);
+              localStorage.setItem('nextcode_last_sync_time', Date.now().toString());
+
+              if (!isSynced) {
+                const mappedProjects = merged.map(p => ({
+                  id: p.id,
+                  name: p.name,
+                  language: p.language as any,
+                  template: p.template,
+                  created_at: p.createdAt,
+                  updated_at: p.updatedAt,
+                }));
+                await syncProjectsToCloud(mappedProjects);
+              }
             } catch (e) {
               console.error('GitHub Cloud sync error:', e);
               setSyncStatus('error');
@@ -141,64 +236,16 @@ export default function Dashboard() {
     }
   }, [accessToken]);
 
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
   useEffect(() => {
-    if (projects.length === 0) return;
+    if (loading) return;
 
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
-      if (accessToken) {
-        try {
-          setSyncStatus('syncing');
-          const fileId = localStorage.getItem('google_drive_file_id') || await getOrCreateDriveFile(accessToken);
-          
-          const serialized = [];
-          for (const p of projects) {
-            serialized.push(await serializeProject(p));
-          }
-
-          await saveToDrive(accessToken, fileId, {
-            version: 1,
-            projects: serialized,
-            updatedAt: Date.now(),
-          });
-          setSyncStatus('synced');
-          setSyncError(null);
-        } catch (e) {
-          console.error('Google Drive save error:', e);
-          setSyncStatus('error');
-          const errMsg = e instanceof Error ? e.message : String(e);
-          setSyncError(errMsg);
-        }
-      } else {
-        const token = getGitHubToken();
-        if (!token) return;
-        try {
-          const gistId = localStorage.getItem('gh_gist_id');
-          if (!gistId) return;
-          setSyncStatus('syncing');
-          
-          const serialized = [];
-          for (const p of projects) {
-            serialized.push(await serializeProject(p));
-          }
-
-          await saveToGist(token, gistId, {
-            version: 1,
-            projects: serialized,
-            updatedAt: Date.now(),
-          });
-          setSyncStatus('synced');
-        } catch (e) {
-          console.error('GitHub save error:', e);
-          setSyncStatus('error');
-        }
-      }
+      await syncProjectsToCloud(projects);
     }, 3000);
 
     return () => clearTimeout(saveTimer.current);
-  }, [projects, accessToken]);
+  }, [projects, accessToken, loading]);
 
   useEffect(() => {
     function close(e: MouseEvent) {
@@ -240,6 +287,9 @@ export default function Dashboard() {
       }
 
       toast('success', `ลบ "${projectName}" แล้ว`);
+
+      // ซิงก์ขึ้น Cloud ทันทีเพื่อบันทึกการลบ
+      await syncProjectsToCloud(projects.filter(p => p.id !== projectId));
     } catch (err) {
       console.error('Delete project error:', err);
       toast('error', err instanceof Error ? err.message : 'ลบไม่สำเร็จ กรุณาลองใหม่อีกครั้ง');
@@ -264,6 +314,9 @@ export default function Dashboard() {
     }
     addProject(newProject as any);
     toast('success', 'ทำสำเนาโปรเจกต์แล้ว');
+
+    // ซิงก์ขึ้น Cloud ทันทีเพื่อบันทึกการทำสำเนา
+    await syncProjectsToCloud([newProject as Project, ...projects]);
   }
 
   async function handleDownloadZip(id: string) {
@@ -287,10 +340,16 @@ export default function Dashboard() {
 
   async function handleRename(id: string) {
     if (!renameVal.trim()) { setRenamingId(null); return; }
-    await db.projects.update(id, { name: renameVal.trim() });
+    const now = Date.now();
+    await db.projects.update(id, { name: renameVal.trim(), updated_at: now });
     const { updateProject } = useAppStore.getState();
-    updateProject(id, { name: renameVal.trim() });
+    updateProject(id, { name: renameVal.trim(), updated_at: now });
     setRenamingId(null);
+
+    // ซิงก์ขึ้น Cloud ทันทีเพื่อบันทึกการเปลี่ยนชื่อ
+    await syncProjectsToCloud(
+      projects.map((p) => (p.id === id ? { ...p, name: renameVal.trim(), updated_at: now } : p))
+    );
   }
 
   // ── Folder / File import ──────────────────────────────────────

@@ -133,21 +133,67 @@ export async function saveToGist(
   );
 }
 
-// helper: merge local + cloud (cloud wins ถ้า newer)
+export function areProjectListsEqual(a: SerializedProject[], b: SerializedProject[]): boolean {
+  if (a.length !== b.length) return false;
+  const sortA = [...a].sort((x, y) => x.id.localeCompare(y.id));
+  const sortB = [...b].sort((x, y) => x.id.localeCompare(y.id));
+  
+  for (let i = 0; i < sortA.length; i++) {
+    const projA = sortA[i];
+    const projB = sortB[i];
+    if (projA.id !== projB.id) return false;
+    if (projA.updatedAt !== projB.updatedAt) return false;
+    if (projA.name !== projB.name) return false;
+    if (projA.language !== projB.language) return false;
+    if (projA.template !== projB.template) return false;
+  }
+  return true;
+}
+
+// helper: merge local + cloud (cloud wins ถ้า newer, จัดการการลบและการสร้างโดยเทียบจาก timestamp ซิงก์ล่าสุด)
 export function mergeProjects(
   local: SerializedProject[],
-  cloud: SerializedProject[]
+  cloud: SerializedProject[],
+  localLastSyncTime: number,
+  cloudStorageUpdatedAt: number
 ): SerializedProject[] {
   const map = new Map<string, SerializedProject>();
 
-  // ใส่ local ก่อน
+  // 1. ใส่ local เข้า map ก่อน
   local.forEach(p => map.set(p.id, p));
 
-  // cloud overwrite ถ้า updatedAt ใหม่กว่า
+  // 2. พิจารณาโปรเจกต์จาก cloud
   cloud.forEach(p => {
     const existing = map.get(p.id);
-    if (!existing || p.updatedAt > existing.updatedAt) {
-      map.set(p.id, p);
+    if (existing) {
+      // ถ้ามีทั้งคู่ ให้เลือกตัวที่ updatedAt ใหม่กว่า
+      if (p.updatedAt > existing.updatedAt) {
+        map.set(p.id, p);
+      }
+    } else {
+      // มีอยู่บน cloud แต่ไม่มีอยู่ใน local
+      // ตรวจสอบว่าโดนลบออกไปใน local หรือเพิ่งถูกสร้างขึ้นบน cloud จากเครื่องอื่น
+      if (p.updatedAt > localLastSyncTime) {
+        // อัปเดตใหม่กว่าเวลาซิงก์ล่าสุดบนเครื่องนี้ -> เป็นโปรเจกต์ที่สร้าง/อัปเดตใหม่ -> ดึงลง local
+        map.set(p.id, p);
+      } else {
+        // เกิดขึ้น/ซิงก์ไปก่อนซิงก์ครั้งล่าสุดแต่หายไปใน local -> แสดงว่าผู้ใช้ลบใน local ไปแล้ว -> คงสถานะลบไว้
+      }
+    }
+  });
+
+  // 3. พิจารณาโปรเจกต์ local ที่ไม่มีอยู่บน cloud
+  const cloudIds = new Set(cloud.map(p => p.id));
+  local.forEach(p => {
+    if (!cloudIds.has(p.id)) {
+      // มีใน local แต่ไม่มีใน cloud
+      // ตรวจสอบว่าถูกลบใน cloud จากเครื่องอื่น หรือเพิ่งสร้างใหม่ใน local เครื่องนี้
+      if (p.updatedAt < cloudStorageUpdatedAt) {
+        // แก้ไขก่อนเวลาอัปเดตคลาวด์ล่าสุดแต่ไม่มีในคลาวด์ -> แสดงว่าถูกลบในคลาวด์จากเครื่องอื่น -> ลบออก
+        map.delete(p.id);
+      } else {
+        // เพิ่งสร้าง/อัปเดตใหม่ในเครื่องนี้หลังจากคลาวด์อัปเดตล่าสุด -> โปรเจกต์ใหม่ -> คงไว้เพื่อเซฟขึ้นคลาวด์
+      }
     }
   });
 
