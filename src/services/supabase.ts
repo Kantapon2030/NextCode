@@ -2,7 +2,7 @@
 // Supabase Cloud Service — Nextcode IDE
 // ─────────────────────────────────────────────────────────────────────────────
 import { createClient } from '@supabase/supabase-js';
-import type { User as SupabaseUser } from '@supabase/supabase-js';
+import type { User as SupabaseUser, AuthChangeEvent, Session } from '@supabase/supabase-js';
 
 export type { User as SupabaseUser } from '@supabase/supabase-js';
 
@@ -63,7 +63,7 @@ export function onAuthStateChange(
   callback: (user: SupabaseUser | null) => void
 ) {
   if (!supabase) return { data: { subscription: { unsubscribe: () => {} } } };
-  return supabase.auth.onAuthStateChange((_event, session) => {
+  return supabase.auth.onAuthStateChange((_event: AuthChangeEvent, session: Session | null) => {
     callback(session?.user ?? null);
   });
 }
