@@ -162,6 +162,9 @@ export default function IDEPage() {
   async function handleAddFile(filename: string, content: string) {
     if (!projectId) return;
     await saveVFSFile(projectId, filename, content, getMimeType(filename));
+    const now = Date.now();
+    store.updateProject(projectId, { updated_at: now });
+    broadcastVFSUpdate(projectId);
     const newVFS = await loadVFS(projectId);
     setVFS(newVFS);
     openTab(filename);
@@ -172,6 +175,9 @@ export default function IDEPage() {
     if (!projectId) return;
     closeTab(filename);
     await deleteVFSFile(projectId, filename);
+    const now = Date.now();
+    store.updateProject(projectId, { updated_at: now });
+    broadcastVFSUpdate(projectId);
     const newVFS = await loadVFS(projectId);
     setVFS(newVFS);
     toast('info', `ลบ ${filename} แล้ว`);
@@ -183,6 +189,9 @@ export default function IDEPage() {
     await saveVFSFile(projectId, newName, content, getMimeType(newName));
     await deleteVFSFile(projectId, oldName);
     closeTab(oldName);
+    const now = Date.now();
+    store.updateProject(projectId, { updated_at: now });
+    broadcastVFSUpdate(projectId);
     const newVFS = await loadVFS(projectId);
     setVFS(newVFS);
     openTab(newName);
@@ -191,6 +200,9 @@ export default function IDEPage() {
   async function handleAddAsset(name: string, buffer: ArrayBuffer, mimeType: string) {
     if (!projectId) return;
     await saveVFSAsset(projectId, name, buffer, mimeType);
+    const now = Date.now();
+    store.updateProject(projectId, { updated_at: now });
+    broadcastVFSUpdate(projectId);
     const newVFS = await loadVFS(projectId);
     setVFS(newVFS);
   }
@@ -198,6 +210,9 @@ export default function IDEPage() {
   async function handleDeleteAsset(name: string) {
     if (!projectId) return;
     await deleteVFSFile(projectId, name);
+    const now = Date.now();
+    store.updateProject(projectId, { updated_at: now });
+    broadcastVFSUpdate(projectId);
     const newVFS = await loadVFS(projectId);
     setVFS(newVFS);
   }

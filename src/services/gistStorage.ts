@@ -188,6 +188,17 @@ export async function saveProjectToLocal(sp: SerializedProject): Promise<Project
   };
   await db.projects.put(p);
   
+  // ลบไฟล์ใน Local ที่ไม่มีในคลาวด์ (ป้องกันไฟล์ผีที่ลบไปแล้วเด้งกลับมาหลัง Sync)
+  const localFiles = await db.files.where({ project_id: sp.id }).toArray();
+  const localPaths = localFiles.filter(f => f.type === 'file').map(f => f.path);
+  const cloudPaths = new Set(Object.keys(sp.files));
+
+  for (const path of localPaths) {
+    if (!cloudPaths.has(path)) {
+      await db.files.delete([sp.id, path]);
+    }
+  }
+  
   for (const [path, fileData] of Object.entries(sp.files)) {
     const existingCollection = db.files.where({ project_id: sp.id, path });
     const existing = await existingCollection.first();

@@ -334,6 +334,7 @@ export async function deleteVFSFile(
   path: string
 ): Promise<void> {
   await db.files.delete([projectId, path]);
+  await db.projects.update(projectId, { updated_at: Date.now() });
 }
 
 export async function deleteVFSFolder(
@@ -347,6 +348,7 @@ export async function deleteVFSFolder(
   for (const f of toDelete) {
     await db.files.delete([projectId, f.path]);
   }
+  await db.projects.update(projectId, { updated_at: Date.now() });
 }
 
 export async function renameNodeInDB(

@@ -429,7 +429,7 @@ export default function Dashboard() {
   }
 
   return (
-    <div className={`${bg} min-h-screen flex flex-col`}>
+    <div className={`${bg} h-full overflow-y-auto flex flex-col`}>
       {/* Navbar */}
       <nav className={`sticky top-0 z-40 flex items-center gap-3 px-6 py-3 border-b backdrop-blur-sm ${navBg}`}>
         <div className="flex items-center gap-2 mr-4">
