@@ -50,11 +50,20 @@ export async function fetchUserInfo(accessToken: string): Promise<{
   email: string;
   picture: string;
 }> {
-  const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  });
-  if (!res.ok) throw new Error('Failed to fetch user info');
-  return res.json();
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    if (!res.ok) throw new Error(`Failed to fetch user info: Status ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
+  }
 }
 
 export function clearAuthFromLocalStorage(): void {

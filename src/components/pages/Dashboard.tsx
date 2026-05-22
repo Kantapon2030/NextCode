@@ -54,6 +54,7 @@ export default function Dashboard() {
   const { user, accessToken, projects, setProjects, addProject, removeProject, logout, theme, supabaseUser, currentProject, resetWorkspace, setCurrentProject, setSyncStatus } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
+  const [activeTab, setActiveTab] = useState<string>('all');
   const [showNew, setShowNew] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [avatarMenu, setAvatarMenu] = useState(false);
@@ -209,9 +210,11 @@ export default function Dashboard() {
     return () => document.removeEventListener('mousedown', close);
   }, []);
 
-  const filtered = projects.filter((p) =>
-    p.name.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = projects.filter((p) => {
+    const matchesSearch = p.name.toLowerCase().includes(search.toLowerCase());
+    const matchesTab = activeTab === 'all' || p.language === activeTab;
+    return matchesSearch && matchesTab;
+  });
 
   const handleDeleteProject = async (projectId: string, projectName: string, e: React.MouseEvent) => {
     e.preventDefault();
@@ -614,6 +617,62 @@ export default function Dashboard() {
 
         </div>
 
+        {/* CSS ซ่อน Scrollbar ของแท็บคัดกรองประเภทโปรเจกต์ */}
+        <style dangerouslySetInnerHTML={{__html: `
+          .scrollbar-none::-webkit-scrollbar {
+            display: none;
+          }
+          .scrollbar-none {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+          }
+        `}} />
+
+        {/* แถบคัดกรองประเภทโปรเจกต์ (Horizontal Scrollable Tabs) */}
+        {!loading && projects.length > 0 && (
+          <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-6 -mx-2 px-2 scrollbar-none whitespace-nowrap select-none animate-slide-down">
+            {[
+              { id: 'all', label: 'ทั้งหมด', color: 'from-primary-500 to-purple-600' },
+              { id: 'html', label: 'HTML/CSS/JS', color: 'from-orange-500 to-amber-500' },
+              { id: 'python', label: 'Python', color: 'from-blue-500 to-cyan-500' },
+              { id: 'c', label: 'C', color: 'from-gray-500 to-slate-500' },
+              { id: 'cpp', label: 'C++', color: 'from-cyan-500 to-blue-500' },
+              { id: 'blank', label: 'Blank', color: 'from-zinc-500 to-stone-500' },
+            ].map((tab) => {
+              const count = tab.id === 'all'
+                ? projects.length
+                : projects.filter((p) => p.language === tab.id).length;
+              const isActive = activeTab === tab.id;
+              
+              let btnClass = "";
+              if (isActive) {
+                btnClass = `bg-gradient-to-r ${tab.color} text-white shadow-glow-sm scale-[1.02] border-transparent`;
+              } else {
+                btnClass = theme === 'dark' 
+                  ? 'bg-surface-800 hover:bg-surface-700 text-zinc-400 hover:text-zinc-200 border-border'
+                  : 'bg-white hover:bg-zinc-100 text-zinc-600 hover:text-zinc-900 border-zinc-200';
+              }
+
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-2 px-4 py-2 border rounded-xl text-xs font-semibold transition-all duration-200 shrink-0 ${btnClass}`}
+                >
+                  <span>{tab.label}</span>
+                  <span className={`px-1.5 py-0.5 rounded-md text-[10px] ${
+                    isActive 
+                      ? 'bg-white/20 text-white' 
+                      : theme === 'dark' ? 'bg-surface-900 text-zinc-500' : 'bg-zinc-100 text-zinc-500'
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {loading ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {[1, 2, 3].map((i) => <SkeletonCard key={i} />)}
@@ -624,12 +683,12 @@ export default function Dashboard() {
               <Code2 className="w-10 h-10 text-zinc-600" />
             </div>
             <h3 className="text-xl font-semibold text-white mb-2">
-              {search ? 'ไม่พบโปรเจกต์ที่ค้นหา' : 'สร้างโปรเจกต์แรกของคุณ'}
+              {search || activeTab !== 'all' ? 'ไม่พบโปรเจกต์ที่ตรงกับเงื่อนไข' : 'สร้างโปรเจกต์แรกของคุณ'}
             </h3>
             <p className="text-zinc-500 text-sm mb-6">
-              {search ? `ลองค้นหาด้วยคำอื่น` : 'เลือกภาษาและเริ่มเขียนโค้ดได้เลย'}
+              {search || activeTab !== 'all' ? 'ลองปรับคำค้นหาหรือตัวเลือกแท็บภาษา' : 'เลือกภาษาและเริ่มเขียนโค้ดได้เลย'}
             </p>
-            {!search && (
+            {!(search || activeTab !== 'all') && (
               <button
                 onClick={() => setShowNew(true)}
                 className="flex items-center gap-2 px-6 py-3 bg-primary-600 hover:bg-primary-500 text-white rounded-xl font-medium transition-colors shadow-glow-sm"

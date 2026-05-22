@@ -65,6 +65,18 @@ export default function LandingPage() {
     document.head.appendChild(script);
   }, []);
 
+  // ปลดล็อกสถานะ Loading เมื่อผู้ใช้โฟกัสกลับมาที่แท็บหลัก (ป้องกันการหมุนค้างกรณีป๊อปอัปปิดไปหรือล้มเหลว)
+  useEffect(() => {
+    const handleFocus = () => {
+      const timer = setTimeout(() => {
+        setLoading(false);
+      }, 2000);
+      return () => clearTimeout(timer);
+    };
+    window.addEventListener('focus', handleFocus);
+    return () => window.removeEventListener('focus', handleFocus);
+  }, []);
+
   function initTokenClient() {
     if (!window.google || !GOOGLE_CLIENT_ID) return;
     tokenClientRef.current = window.google.accounts.oauth2.initTokenClient({

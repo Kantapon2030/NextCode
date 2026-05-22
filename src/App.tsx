@@ -25,18 +25,23 @@ export default function App() {
 
   useEffect(() => {
     async function init() {
-      const auth = loadAuthFromLocalStorage();
-      if (auth && !isTokenExpired(auth.expiry_time)) {
-        setUser({ id: auth.id, name: auth.name, email: auth.email, avatar: auth.avatar });
-        setAccessToken(auth.access_token, auth.expiry_time);
+      try {
+        const auth = loadAuthFromLocalStorage();
+        if (auth && !isTokenExpired(auth.expiry_time)) {
+          setUser({ id: auth.id, name: auth.name, email: auth.email, avatar: auth.avatar });
+          setAccessToken(auth.access_token, auth.expiry_time);
+        }
+        const savedTheme = await getSetting<'dark' | 'light'>('theme', 'dark');
+        const savedFont = await getSetting<number>('font_size', 14);
+        const savedMode = await getSetting<'beginner' | 'expert'>('user_mode', 'beginner');
+        setTheme(savedTheme);
+        setFontSize(savedFont);
+        setUserMode(savedMode);
+      } catch (err) {
+        console.error('App auth initialization failed:', err);
+      } finally {
+        setAuthChecked(true);
       }
-      const savedTheme = await getSetting<'dark' | 'light'>('theme', 'dark');
-      const savedFont = await getSetting<number>('font_size', 14);
-      const savedMode = await getSetting<'beginner' | 'expert'>('user_mode', 'beginner');
-      setTheme(savedTheme);
-      setFontSize(savedFont);
-      setUserMode(savedMode);
-      setAuthChecked(true);
     }
     init();
   }, []);
@@ -178,7 +183,7 @@ export default function App() {
           className="fixed bottom-3 left-3 z-[9999] text-[10px] font-mono text-zinc-500/80 select-none bg-surface-950/40 backdrop-blur-sm px-2 py-0.5 rounded border border-border/20 pointer-events-none"
           title="Nextcode IDE Version"
         >
-          v1.0.1
+          v1.0.2
         </div>
       </div>
     </BrowserRouter>

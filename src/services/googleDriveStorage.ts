@@ -2,6 +2,22 @@ import type { GistData } from './gistStorage';
 
 const DRIVE_FILENAME = 'nextcode-data.json';
 
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 10000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(id);
+    return res;
+  } catch (err) {
+    clearTimeout(id);
+    throw err;
+  }
+}
+
 async function throwDriveError(res: Response, prefix: string): Promise<never> {
   let detail = `Status ${res.status}`;
   try {
@@ -31,7 +47,7 @@ export async function getOrCreateDriveFile(accessToken: string): Promise<string>
   const query = encodeURIComponent(`name = '${DRIVE_FILENAME}' and trashed = false`);
   const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`;
 
-  const searchRes = await fetch(searchUrl, {
+  const searchRes = await fetchWithTimeout(searchUrl, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
@@ -50,7 +66,7 @@ export async function getOrCreateDriveFile(accessToken: string): Promise<string>
   }
 
   // 2. ถ้าไม่พบไฟล์ ให้สร้างไฟล์ใหม่ (ขั้นตอนที่ 1: สร้าง Metadata)
-  const createMetadataRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+  const createMetadataRes = await fetchWithTimeout('https://www.googleapis.com/drive/v3/files', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -86,7 +102,7 @@ export async function getOrCreateDriveFile(accessToken: string): Promise<string>
  * โหลดข้อมูล GistData จากไฟล์ใน Google Drive
  */
 export async function loadFromDrive(accessToken: string, fileId: string): Promise<GistData> {
-  const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+  const res = await fetchWithTimeout(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
     headers: {
       Authorization: `Bearer ${accessToken}`,
     },
@@ -114,7 +130,7 @@ export async function loadFromDrive(accessToken: string, fileId: string): Promis
 export async function saveToDrive(accessToken: string, fileId: string, data: GistData): Promise<void> {
   const uploadUrl = `https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`;
 
-  const res = await fetch(uploadUrl, {
+  const res = await fetchWithTimeout(uploadUrl, {
     method: 'PATCH',
     headers: {
       Authorization: `Bearer ${accessToken}`,
