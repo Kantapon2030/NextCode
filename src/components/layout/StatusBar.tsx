@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppStore } from '../../store/appStore';
 import { Cloud, CloudOff, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
+import { setSetting } from '../../storage/db';
 
 interface Props {
   filename: string;
@@ -10,7 +11,13 @@ interface Props {
 }
 
 export function StatusBar({ filename: _filename, language, line, col }: Props) {
-  const { saveStatus, syncStatus, theme } = useAppStore();
+  const { saveStatus, syncStatus, theme, minimapEnabled, setMinimapEnabled } = useAppStore();
+
+  const handleToggleMinimap = async () => {
+    const nextVal = !minimapEnabled;
+    setMinimapEnabled(nextVal);
+    await setSetting('minimap_enabled', nextVal);
+  };
 
   const saveBadge = {
     saved: { icon: <CheckCircle className="w-3 h-3" />, text: 'บันทึกแล้ว', cls: 'text-green-400' },
@@ -26,13 +33,30 @@ export function StatusBar({ filename: _filename, language, line, col }: Props) {
     error: { icon: <AlertCircle className="w-3 h-3" />, text: 'Sync ผิดพลาด', cls: 'text-red-400' },
   }[syncStatus];
 
-  const bg = theme === 'dark' ? 'bg-surface-950 border-border text-zinc-400' : 'bg-zinc-100 border-zinc-200 text-zinc-600';
+  const bg = theme === 'dark' || theme === 'high-contrast' ? 'bg-surface-950 border-border text-zinc-400' : 'bg-zinc-100 border-zinc-200 text-zinc-600';
 
   return (
     <div className={`flex items-center justify-between px-4 h-6 text-xs border-t select-none shrink-0 ${bg}`}>
       {/* Left info */}
       <div className="flex items-center gap-4">
-        <span className="font-mono uppercase text-primary-400">{language}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="font-mono uppercase text-primary-400">{language}</span>
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('nextcode:formatCode'))}
+            className="hover:text-white transition-colors bg-surface-800 hover:bg-surface-700 px-1.5 py-0.5 rounded border border-border/40 text-[9px] font-mono leading-none"
+            title="จัดรูปแบบโค้ด (Ctrl+Shift+F)"
+          >
+            ⌥ Format
+          </button>
+          
+          <button
+            onClick={handleToggleMinimap}
+            className={`hover:text-white transition-colors px-1.5 py-0.5 rounded border text-[9px] font-mono leading-none ${minimapEnabled ? 'bg-primary-950/20 text-primary-400 border-primary-500/30' : 'bg-surface-800 text-zinc-500 border-border/40'}`}
+            title="แสดง/ซ่อน แผนที่โค้ด (Minimap)"
+          >
+            🗺️ Minimap
+          </button>
+        </div>
         <span className="font-mono">บรรทัด {line}:{col}</span>
         <span>UTF-8</span>
       </div>

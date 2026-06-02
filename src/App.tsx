@@ -17,7 +17,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-  const { user, setUser, setAccessToken, setTheme, setFontSize, setUserMode, theme } =
+  const { user, setUser, setAccessToken, setTheme, setFontSize, setUserMode, theme, fontFamily, setFontFamily, setMinimapEnabled } =
     useAppStore();
   const [authChecked, setAuthChecked] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -31,11 +31,15 @@ export default function App() {
           setUser({ id: auth.id, name: auth.name, email: auth.email, avatar: auth.avatar });
           setAccessToken(auth.access_token, auth.expiry_time);
         }
-        const savedTheme = await getSetting<'dark' | 'light'>('theme', 'dark');
+        const savedTheme = await getSetting<'dark' | 'light' | 'high-contrast'>('theme', 'dark');
         const savedFont = await getSetting<number>('font_size', 14);
+        const savedFontFamily = await getSetting<string>('font_family', 'JetBrains Mono');
+        const savedMinimap = await getSetting<boolean>('minimap_enabled', true);
         const savedMode = await getSetting<'beginner' | 'expert'>('user_mode', 'beginner');
         setTheme(savedTheme);
         setFontSize(savedFont);
+        setFontFamily(savedFontFamily);
+        setMinimapEnabled(savedMinimap);
         setUserMode(savedMode);
       } catch (err) {
         console.error('App auth initialization failed:', err);
@@ -90,12 +94,29 @@ export default function App() {
     const root = document.documentElement;
     if (theme === 'light') {
       root.classList.add('light');
-      root.classList.remove('dark');
+      root.classList.remove('dark', 'high-contrast');
+    } else if (theme === 'high-contrast') {
+      root.classList.add('high-contrast');
+      root.classList.remove('dark', 'light');
     } else {
       root.classList.add('dark');
-      root.classList.remove('light');
+      root.classList.remove('light', 'high-contrast');
     }
   }, [theme]);
+
+  // Load Google Font dynamically when changed
+  useEffect(() => {
+    if (!fontFamily) return;
+    const linkId = 'google-font-editor';
+    let linkEl = document.getElementById(linkId) as HTMLLinkElement;
+    if (!linkEl) {
+      linkEl = document.createElement('link');
+      linkEl.id = linkId;
+      linkEl.rel = 'stylesheet';
+      document.head.appendChild(linkEl);
+    }
+    linkEl.href = `https://fonts.googleapis.com/css2?family=${fontFamily.replace(/\s+/g, '+')}&display=swap`;
+  }, [fontFamily]);
 
   if (!authChecked) {
     return <LoadingSpinner fullscreen message="กำลังตรวจสอบการเข้าสู่ระบบ..." />;
@@ -183,7 +204,7 @@ export default function App() {
           className="fixed bottom-3 left-3 z-[9999] text-[10px] font-mono text-zinc-500/80 select-none bg-surface-950/40 backdrop-blur-sm px-2 py-0.5 rounded border border-border/20 pointer-events-none"
           title="Nextcode IDE Version"
         >
-          v1.0.3
+          v1.1.0
         </div>
       </div>
     </BrowserRouter>

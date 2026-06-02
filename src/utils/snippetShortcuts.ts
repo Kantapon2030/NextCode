@@ -2,6 +2,7 @@
 // Snippet Shortcuts for Nextcode IDE
 // Monaco CompletionItemProvider + Tab key expansion
 // ────────────────────────────────────────────────────────────
+import { expandEmmet, TAG_SHORTHANDS } from './emmetHelper';
 
 export interface Snippet {
   trigger: string;
@@ -734,6 +735,79 @@ type IRange = {
 type IPosition = { lineNumber: number; column: number };
 
 // ────────────────────────────────────────────────────────────
+// Multi-language Shorthands Definition
+// ────────────────────────────────────────────────────────────
+export const SHORTHANDS: Record<string, Record<string, string>> = {
+  python: {
+    p: 'print($1)',
+    pr: 'print($1)',
+    df: 'def ${1:name}(${2:params}):\n\t${3:pass}',
+    def: 'def ${1:name}(${2:params}):\n\t${3:pass}',
+    if: 'if ${1:condition}:\n\t${2:pass}',
+    el: 'else:\n\t${1:pass}',
+    ei: 'elif ${1:condition}:\n\t${2:pass}',
+    for: 'for ${1:item} in ${2:iterable}:\n\t${3:pass}',
+    fr: 'for ${1:item} in ${2:iterable}:\n\t${3:pass}',
+    wh: 'while ${1:condition}:\n\t${2:pass}',
+    im: 'import ${1:module}',
+    fim: 'from ${1:module} import ${2:name}',
+    cl: 'class ${1:ClassName}:\n\tdef __init__(self):\n\t\t${2:pass}',
+    ret: 'return ${1:value}',
+    try: 'try:\n\t${1:pass}\nexcept ${2:Exception} as e:\n\t${3:pass}',
+    main: 'if __name__ == "__main__":\n\t${1:main()}',
+  },
+  c: {
+    inc: '#include <${1:stdio.h}>',
+    main: 'int main(void) {\n\t${1:}\n\treturn 0;\n}',
+    pr: 'printf("${1:%d}\\n", ${2:var});',
+    for: 'for (int ${1:i} = 0; ${1:i} < ${2:count}; ${1:i}++) {\n\t${3:}\n}',
+    if: 'if (${1:condition}) {\n\t${2:}\n}',
+    el: 'else {\n\t${1:}\n}',
+    ret: 'return ${1:0};',
+    fn: '${1:void} ${2:name}(${3:void}) {\n\t${4:}\n}',
+    struct: 'struct ${1:Name} {\n\t${2:}\n};',
+    wh: 'while (${1:condition}) {\n\t${2:}\n}',
+  },
+  cpp: {
+    inc: '#include <${1:iostream}>',
+    main: 'int main() {\n\t${1:}\n\treturn 0;\n}',
+    co: 'std::cout << ${1:value} << std::endl;',
+    ci: 'std::cin >> ${1:var};',
+    vec: 'std::vector<${1:int}> ${2:name};',
+    for: 'for (int ${1:i} = 0; ${1:i} < ${2:count}; ${1:i}++) {\n\t${3:}\n}',
+    fore: 'for (const auto& ${1:item} : ${2:container}) {\n\t${3:}\n}',
+    if: 'if (${1:condition}) {\n\t${2:}\n}',
+    el: 'else {\n\t${1:}\n}',
+    ret: 'return ${1:0};',
+    fn: '${1:void} ${2:name}(${3:}) {\n\t${4:}\n}',
+    cl: 'class ${1:ClassName} {\nprivate:\npublic:\n\t${1:ClassName}() = default;\n};',
+    struct: 'struct ${1:Name} {\n\t${2:}\n};',
+  }
+};
+
+function isJsxOrHtmlContext(model: any, position: IPosition): boolean {
+  const lineContent = model.getLineContent(position.lineNumber);
+  const textBefore = lineContent.substring(0, position.column - 1);
+  const trimmedBefore = textBefore.trim();
+  
+  if (trimmedBefore.endsWith('<') || /<[a-zA-Z0-9_-]*$/.test(trimmedBefore)) {
+    return true;
+  }
+  
+  // Scan preceding lines for JSX clues
+  let isReturnBlock = false;
+  const startLine = Math.max(1, position.lineNumber - 15);
+  for (let l = position.lineNumber; l >= startLine; l--) {
+    const content = model.getLineContent(l);
+    if (content.includes('return (') || content.includes('return <') || content.trim().startsWith('<')) {
+      isReturnBlock = true;
+      break;
+    }
+  }
+  return isReturnBlock;
+}
+
+// ────────────────────────────────────────────────────────────
 // HTML Emmet tags and helpers
 // ────────────────────────────────────────────────────────────
 
@@ -802,8 +876,9 @@ export function registerCompletionProvider(
   monacoLang: string,
   getCustomSnippets: () => Snippet[] = () => []
 ): void {
-  if (_registered.has(monacoLang)) return;
-  _registered.add(monacoLang);
+  const key = `${monacoLang}`;
+  if (_registered.has(key)) return;
+  _registered.add(key);
 
   // 1. ! snippet completion item provider
   monacoInstance.languages.registerCompletionItemProvider(monacoLang, {
@@ -816,7 +891,6 @@ export function registerCompletionProvider(
       const lineContent: string = model.getLineContent(position.lineNumber);
       const textBefore = lineContent.substring(0, position.column - 1);
 
-      // Only show when line starts with or ends with a '!' trigger
       if (!textBefore.includes('!')) return { suggestions: [] };
 
       const word = model.getWordUntilPosition(position);
@@ -829,7 +903,6 @@ export function registerCompletionProvider(
 
       const snippets = getSnippetsForLang(monacoLang, getCustomSnippets());
 
-      // Find the trigger prefix typed on this line (everything from last '!')
       const bangIndex = textBefore.lastIndexOf('!');
       const typed = bangIndex >= 0 ? textBefore.slice(bangIndex) : '';
 
@@ -850,7 +923,6 @@ export function registerCompletionProvider(
           sortText: '0' + s.trigger, // show snippets first
           range: {
             ...range,
-            // Replace from the '!' position
             startColumn: bangIndex + 1,
           },
         })),
@@ -858,10 +930,15 @@ export function registerCompletionProvider(
     },
   });
 
-  // 2. HTML Tag Emmet-like Completion Item Provider (for html/htm files)
-  if (monacoLang === 'html' || monacoLang === 'htm') {
+  // 2. HTML Tag and Shorthand completion (for HTML/JS/TS web files)
+  const isWebLang = ['html', 'htm', 'javascript', 'typescript'].includes(monacoLang);
+  if (isWebLang) {
     monacoInstance.languages.registerCompletionItemProvider(monacoLang, {
       provideCompletionItems(model: any, position: IPosition) {
+        if ((monacoLang === 'javascript' || monacoLang === 'typescript') && !isJsxOrHtmlContext(model, position)) {
+          return { suggestions: [] };
+        }
+
         const lineContent: string = model.getLineContent(position.lineNumber);
         const textBefore = lineContent.substring(0, position.column - 1);
         const word = model.getWordUntilPosition(position);
@@ -869,40 +946,103 @@ export function registerCompletionProvider(
 
         if (!currentTyped) return { suggestions: [] };
 
-        // Check if there is a '<' immediately preceding the word
         const hasLeftBracket = textBefore.trimEnd().endsWith('<' + word.word) || textBefore.endsWith('<');
+        const startCol = hasLeftBracket
+          ? Math.max(1, position.column - currentTyped.length - 1)
+          : word.startColumn;
 
-        const matchedTags = HTML_TAGS.filter((tag) => tag.startsWith(currentTyped));
-        if (matchedTags.length === 0) return { suggestions: [] };
+        const suggestions: any[] = [];
 
-        return {
-          suggestions: matchedTags.map((tag) => {
-            const insertText = getInsertTextForTag(tag);
-            const startCol = hasLeftBracket
-              ? Math.max(1, position.column - currentTyped.length - 1)
-              : word.startColumn;
-
-            return {
-              label: tag,
+        // Add Shorthand Suggestions (priority 000_)
+        for (const key in TAG_SHORTHANDS) {
+          if (key.startsWith(currentTyped)) {
+            const targetTag = TAG_SHORTHANDS[key];
+            const insertText = getInsertTextForTag(targetTag);
+            suggestions.push({
+              label: key,
               kind: monacoInstance.languages.CompletionItemKind.Snippet,
-              detail: `HTML <${tag}> Tag`,
+              detail: `Shorthand for <${targetTag}>`,
               documentation: {
                 value: `Expand to \`${insertText.replace(/\$\d+|\$\{\d+:?([^}]*)\}/g, '$1')}\``,
               },
               insertText: insertText,
-              insertTextRules:
-                monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-              filterText: hasLeftBracket ? '<' + tag : tag,
+              insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              filterText: hasLeftBracket ? '<' + key : key,
               range: {
                 startLineNumber: position.lineNumber,
                 startColumn: startCol,
                 endLineNumber: position.lineNumber,
                 endColumn: word.endColumn,
               },
-              sortText: '00_' + tag, // prioritize HTML tags in suggestions
-            };
-          }),
-        };
+              sortText: '000_' + key,
+            });
+          }
+        }
+
+        // Add standard HTML tag suggestions (priority 00_)
+        const matchedTags = HTML_TAGS.filter((tag) => tag.startsWith(currentTyped));
+        for (const tag of matchedTags) {
+          if (suggestions.some(s => s.label === tag)) continue;
+          
+          const insertText = getInsertTextForTag(tag);
+          suggestions.push({
+            label: tag,
+            kind: monacoInstance.languages.CompletionItemKind.Snippet,
+            detail: `HTML <${tag}> Tag`,
+            documentation: {
+              value: `Expand to \`${insertText.replace(/\$\d+|\$\{\d+:?([^}]*)\}/g, '$1')}\``,
+            },
+            insertText: insertText,
+            insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+            filterText: hasLeftBracket ? '<' + tag : tag,
+            range: {
+              startLineNumber: position.lineNumber,
+              startColumn: startCol,
+              endLineNumber: position.lineNumber,
+              endColumn: word.endColumn,
+            },
+            sortText: '00_' + tag,
+          });
+        }
+
+        return { suggestions };
+      },
+    });
+  }
+
+  // 3. Shorthand completion for other languages (python, c, cpp)
+  const langShorthands = SHORTHANDS[monacoLang];
+  if (langShorthands) {
+    monacoInstance.languages.registerCompletionItemProvider(monacoLang, {
+      provideCompletionItems(model: any, position: IPosition) {
+        const word = model.getWordUntilPosition(position);
+        const currentTyped = word.word.toLowerCase();
+        if (!currentTyped) return { suggestions: [] };
+
+        const suggestions: any[] = [];
+        for (const key in langShorthands) {
+          if (key.startsWith(currentTyped)) {
+            const body = langShorthands[key];
+            suggestions.push({
+              label: key,
+              kind: monacoInstance.languages.CompletionItemKind.Snippet,
+              detail: `Shorthand for ${key}`,
+              documentation: {
+                value: `Expand to:\n\`\`\`${monacoLang}\n${body}\n\`\`\``,
+              },
+              insertText: body,
+              insertTextRules: monacoInstance.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+              range: {
+                startLineNumber: position.lineNumber,
+                startColumn: word.startColumn,
+                endLineNumber: position.lineNumber,
+                endColumn: word.endColumn,
+              },
+              sortText: '00_' + key,
+            });
+          }
+        }
+        return { suggestions };
       },
     });
   }
@@ -958,55 +1098,83 @@ export function registerTabExpansion(
     if (!position || !model) return;
 
     const lineContent: string = model.getLineContent(position.lineNumber);
-    const textBefore = lineContent.substring(0, position.column - 1).trimStart();
+    const textBefore = lineContent.substring(0, position.column - 1);
+    const trimmedBefore = textBefore.trim();
 
-    // ── 1. HTML tag auto-close (Emmet-like) ─────────────────
-    if (monacoLang === 'html' || monacoLang === 'htm') {
-      // 1.1 ตรวจกรณีพิมพ์ <tagname แล้วกด Tab
-      const tagMatch = textBefore.match(/<([a-zA-Z][a-zA-Z0-9-]*)([^>]*)$/);
-      if (tagMatch) {
-        const tag  = tagMatch[1];
-        const attrs = tagMatch[2] ?? '';
-        const deleteLen = 1 + tag.length + attrs.length; // '<' + tagname + attrs
+    // ── 1. Web Emmet / Shorthand Expansion ─────────────────
+    const isWebLang = ['html', 'htm', 'javascript', 'typescript'].includes(monacoLang);
+    if (isWebLang) {
+      const shouldExpand = !['javascript', 'typescript'].includes(monacoLang) || isJsxOrHtmlContext(model, position);
 
-        e.preventDefault();
-        e.stopPropagation();
+      if (shouldExpand) {
+        const match = textBefore.match(/([a-zA-Z0-9.#>+*\-_]+)$/);
+        if (match) {
+          const expr = match[1];
+          let hasLeftBracket = false;
+          let cleanExpr = expr;
+          const matchWithBracket = textBefore.match(/<([a-zA-Z0-9.#>+*\-_]+)$/);
+          if (matchWithBracket) {
+            hasLeftBracket = true;
+            cleanExpr = matchWithBracket[1];
+          }
 
-        const ctrl = editor.getContribution('snippetController2') as any;
-        if (VOID_TAGS.has(tag.toLowerCase())) {
-          ctrl?.insert(`${attrs}>$0`, { overwriteBefore: attrs.length });
-        } else {
-          ctrl?.insert(
-            `<${tag}${attrs}>$1</${tag}>$0`,
-            { overwriteBefore: deleteLen }
-          );
+          const { body, isValid } = expandEmmet(cleanExpr);
+          if (isValid && body) {
+            e.preventDefault();
+            e.stopPropagation();
+
+            const ctrl = editor.getContribution('snippetController2') as any;
+            const overwriteLen = hasLeftBracket ? cleanExpr.length + 1 : cleanExpr.length;
+            if (ctrl?.insert) {
+              ctrl.insert(body, { overwriteBefore: overwriteLen });
+            } else {
+              const range: IRange = {
+                startLineNumber: position.lineNumber,
+                startColumn: position.column - overwriteLen,
+                endLineNumber: position.lineNumber,
+                endColumn: position.column,
+              };
+              editor.executeEdits('emmet', [{ range, text: body.replace(/\$\d+|\$\{\d+:?([^}]*)\}/g, '$1') }]);
+            }
+            return;
+          }
         }
-        return;
       }
+    }
 
-      // 1.2 ตรวจกรณีพิมพ์ tagname แบบไม่มี < แล้วกด Tab (เช่น table, div)
-      const wordMatch = textBefore.match(/([a-zA-Z][a-zA-Z0-9-]*)$/);
-      if (wordMatch) {
-        const tag = wordMatch[1];
-        if (HTML_TAGS_SET.has(tag.toLowerCase()) && !textBefore.endsWith('<' + tag)) {
-          const deleteLen = tag.length;
+    // ── 2. Other Languages Shorthands Expansion ──────────
+    const langShorthands = SHORTHANDS[monacoLang];
+    if (langShorthands) {
+      const match = textBefore.match(/([a-zA-Z0-9_]+)$/);
+      if (match) {
+        const word = match[1];
+        if (langShorthands[word]) {
           e.preventDefault();
           e.stopPropagation();
 
           const ctrl = editor.getContribution('snippetController2') as any;
-          const insertText = getInsertTextForTag(tag);
-          ctrl?.insert(insertText, { overwriteBefore: deleteLen });
+          if (ctrl?.insert) {
+            ctrl.insert(langShorthands[word], { overwriteBefore: word.length });
+          } else {
+            const range: IRange = {
+              startLineNumber: position.lineNumber,
+              startColumn: position.column - word.length,
+              endLineNumber: position.lineNumber,
+              endColumn: position.column,
+            };
+            editor.executeEdits('shorthand', [{ range, text: langShorthands[word].replace(/\$\d+|\$\{\d+:?([^}]*)\}/g, '$1') }]);
+          }
           return;
         }
       }
     }
 
-    // ── 2. !snippet trigger ────────────────────────────
+    // ── 3. !snippet trigger ────────────────────────────
     const snippets = getSnippetsForLang(monacoLang, getCustomSnippets());
 
     // Find the longest matching trigger
     const matched = snippets
-      .filter((s) => textBefore === s.trigger || textBefore.endsWith(s.trigger))
+      .filter((s) => trimmedBefore === s.trigger || trimmedBefore.endsWith(s.trigger))
       .sort((a, b) => b.trigger.length - a.trigger.length)[0];
 
     if (!matched) return;

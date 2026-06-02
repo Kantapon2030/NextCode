@@ -70,8 +70,10 @@ interface AppState {
   terminalOutput: TerminalEntry[];
   previewWidth: PreviewWidth;
   commandPaletteOpen: boolean;
-  theme: 'dark' | 'light';
+  theme: 'dark' | 'light' | 'high-contrast';
   fontSize: number;
+  fontFamily: string;
+  minimapEnabled: boolean;
   showMultiTabBanner: boolean;
 
   setUser: (user: User | null) => void;
@@ -107,8 +109,10 @@ interface AppState {
   clearTerminal: () => void;
   setPreviewWidth: (w: PreviewWidth) => void;
   setCommandPaletteOpen: (open: boolean) => void;
-  setTheme: (theme: 'dark' | 'light') => void;
+  setTheme: (theme: 'dark' | 'light' | 'high-contrast') => void;
   setFontSize: (size: number) => void;
+  setFontFamily: (font: string) => void;
+  setMinimapEnabled: (enabled: boolean) => void;
   setShowMultiTabBanner: (show: boolean) => void;
   resetProjectState: () => void;
   /** ล้าง workspace state ทั้งหมดเมื่อเปลี่ยนโปรเจกต์ */
@@ -142,6 +146,8 @@ export const useAppStore = create<AppState>((set) => ({
   commandPaletteOpen: false,
   theme: 'dark',
   fontSize: 14,
+  fontFamily: 'JetBrains Mono',
+  minimapEnabled: true,
   showMultiTabBanner: false,
 
   setUser: (user) => set({ user }),
@@ -264,6 +270,8 @@ export const useAppStore = create<AppState>((set) => ({
   setCommandPaletteOpen: (commandPaletteOpen) => set({ commandPaletteOpen }),
   setTheme: (theme) => set({ theme }),
   setFontSize: (fontSize) => set({ fontSize }),
+  setFontFamily: (fontFamily) => set({ fontFamily }),
+  setMinimapEnabled: (minimapEnabled) => set({ minimapEnabled }),
   setShowMultiTabBanner: (showMultiTabBanner) => set({ showMultiTabBanner }),
   resetProjectState: () =>
     set({

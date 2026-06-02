@@ -33,7 +33,7 @@ const features = [
   {
     icon: <Brain className="w-6 h-6" />,
     title: 'AI แก้บัคภาษาไทย',
-    desc: 'Gemini 2.0 Flash ช่วยเขียน แก้บัค และอธิบายโค้ดเป็นภาษาไทย',
+    desc: 'Gemini 2.5 Flash Lite ช่วยเขียน แก้บัค และอธิบายโค้ดเป็นภาษาไทย',
     color: 'from-purple-500 to-pink-500',
   },
   {
@@ -150,7 +150,7 @@ export default function LandingPage() {
           </div>
           <div className="flex items-center gap-2 text-xs text-zinc-500">
             <Zap className="w-3 h-3 text-primary-400" />
-            <span>Powered by Gemini 2.0</span>
+            <span>Powered by Gemini 2.5 Flash Lite</span>
           </div>
         </nav>
 
@@ -250,7 +250,7 @@ export default function LandingPage() {
             </div>
             <div className="flex items-center gap-1.5 opacity-70">
               <Brain className="w-3 h-3 text-purple-400" />
-              <span>Powered by <strong className="text-purple-300 font-medium">Gemini 2.0 Flash</strong></span>
+              <span>Powered by <strong className="text-purple-300 font-medium">Gemini 2.5 Flash Lite</strong></span>
             </div>
           </div>
         </footer>

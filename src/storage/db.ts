@@ -74,6 +74,13 @@ export interface DeployHistory {
   deployed_at: number;
 }
 
+export interface TerminalRunHistoryEntry {
+  id?: number;
+  project_id: string;
+  timestamp: number;
+  input: string;
+}
+
 export class NextcodeDB extends Dexie {
   projects!: Table<Project>;
   files!: Table<ProjectFile>;
@@ -83,6 +90,7 @@ export class NextcodeDB extends Dexie {
   terminal_history!: Table<TerminalHistoryEntry>;
   custom_snippets!: Table<CustomSnippet>;
   deploy_history!: Table<DeployHistory>;
+  terminal_run_history!: Table<TerminalRunHistoryEntry>;
 
   constructor() {
     super('NextcodeIDE_v1');
@@ -188,6 +196,18 @@ export class NextcodeDB extends Dexie {
       custom_snippets: '++id, trigger, language, createdAt',
       deploy_history: '++id, project_id, provider, deployed_at',
     });
+
+    // v6: Add terminal_run_history table
+    this.version(6).stores({
+      projects: '&id, name, language, template, created_at, updated_at, drive_folder_id',
+      files: '&[project_id+path], project_id, path, name, parent_path, type, drive_file_id, is_dirty, updated_at, [project_id+parent_path]',
+      snapshots: '++id, project_id, timestamp, type',
+      settings: '&key',
+      terminal_history: '++id, project_id, timestamp, type',
+      custom_snippets: '++id, trigger, language, createdAt',
+      deploy_history: '++id, project_id, provider, deployed_at',
+      terminal_run_history: '++id, project_id, timestamp',
+    });
   }
 }
 
@@ -280,4 +300,32 @@ export async function deleteProjectDeployHistory(projectId: string): Promise<voi
   if (db.deploy_history) {
     await db.deploy_history.where('project_id').equals(projectId).delete();
   }
+}
+
+export async function getTerminalHistory(projectId: string): Promise<TerminalRunHistoryEntry[]> {
+  if (!db.terminal_run_history) return [];
+  return db.terminal_run_history
+    .where('project_id')
+    .equals(projectId)
+    .reverse()
+    .sortBy('timestamp');
+}
+
+export async function saveTerminalHistory(projectId: string, input: string): Promise<void> {
+  if (!db.terminal_run_history) return;
+  
+  // avoid duplicate recent inputs
+  const existing = await db.terminal_run_history
+    .where('project_id')
+    .equals(projectId)
+    .toArray();
+  
+  const isDuplicate = existing.some(h => h.input.trim() === input.trim());
+  if (isDuplicate) return;
+
+  await db.terminal_run_history.add({
+    project_id: projectId,
+    timestamp: Date.now(),
+    input
+  });
 }

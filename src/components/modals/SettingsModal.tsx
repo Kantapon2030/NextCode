@@ -12,7 +12,7 @@ import {
 interface Props { onClose: () => void; }
 
 export default function SettingsModal({ onClose }: Props) {
-  const { user, theme, setTheme, fontSize, setFontSize, userMode, setUserMode } = useAppStore();
+  const { user, theme, setTheme, fontSize, setFontSize, userMode, setUserMode, fontFamily, setFontFamily } = useAppStore();
   const [apiKey, setApiKey] = useState('');
   const [maskedKey, setMaskedKey] = useState('');
   const [newKey, setNewKey] = useState('');
@@ -22,6 +22,7 @@ export default function SettingsModal({ onClose }: Props) {
   const [showKeyInput, setShowKeyInput] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [inlineComplete, setInlineComplete] = useState(true);
 
   useEffect(() => {
     const isStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone;
@@ -52,23 +53,31 @@ export default function SettingsModal({ onClose }: Props) {
 
   useEffect(() => {
     async function load() {
-      if (!user) return;
+      const userId = user?.id || 'guest';
       const encrypted = await getSetting<{ iv: string; ciphertext: string } | null>(
-        `gemini_key_${user.id}`, null
+        `gemini_key_${userId}`, null
       );
       if (encrypted) {
-        const plain = await decryptApiKey(encrypted.iv, encrypted.ciphertext, user.id);
+        const plain = await decryptApiKey(encrypted.iv, encrypted.ciphertext, userId);
         setApiKey(plain);
         setMaskedKey(maskApiKey(plain));
       }
+      const ic = await getSetting<boolean>('inline_complete', true);
+      setInlineComplete(ic);
     }
     load();
   }, [user]);
 
+  async function handleToggleInlineComplete(val: boolean) {
+    setInlineComplete(val);
+    await setSetting('inline_complete', val);
+  }
+
   async function handleSaveKey() {
-    if (!newKey.trim() || !user) return;
-    const encrypted = await encryptApiKey(newKey.trim(), user.id);
-    await setSetting(`gemini_key_${user.id}`, encrypted);
+    if (!newKey.trim()) return;
+    const userId = user?.id || 'guest';
+    const encrypted = await encryptApiKey(newKey.trim(), userId);
+    await setSetting(`gemini_key_${userId}`, encrypted);
     setApiKey(newKey.trim());
     setMaskedKey(maskApiKey(newKey.trim()));
     setNewKey('');
@@ -77,8 +86,8 @@ export default function SettingsModal({ onClose }: Props) {
   }
 
   async function handleDeleteKey() {
-    if (!user) return;
-    await setSetting(`gemini_key_${user.id}`, null);
+    const userId = user?.id || 'guest';
+    await setSetting(`gemini_key_${userId}`, null);
     setApiKey('');
     setMaskedKey('');
     toast('info', 'ลบ API Key แล้ว');
@@ -98,7 +107,7 @@ export default function SettingsModal({ onClose }: Props) {
     setTesting(false);
   }
 
-  async function handleTheme(t: 'dark' | 'light') {
+  async function handleTheme(t: 'dark' | 'light' | 'high-contrast') {
     setTheme(t);
     await setSetting('theme', t);
   }
@@ -112,6 +121,11 @@ export default function SettingsModal({ onClose }: Props) {
   async function handleMode(m: 'beginner' | 'expert') {
     setUserMode(m);
     await setSetting('user_mode', m);
+  }
+
+  async function handleFontFamily(font: string) {
+    setFontFamily(font);
+    await setSetting('font_family', font);
   }
 
 
@@ -130,22 +144,31 @@ export default function SettingsModal({ onClose }: Props) {
           {/* Theme */}
           <section>
             <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">ธีม</h3>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button
                 onClick={() => handleTheme('dark')}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 text-sm font-medium transition-all ${
+                className={`flex items-center justify-center gap-1.5 py-2 rounded-xl border-2 text-xs font-medium transition-all ${
                   theme === 'dark' ? 'border-primary-500 bg-primary-500/10 text-white' : 'border-border bg-surface-700 text-zinc-400'
                 }`}
               >
-                <Moon className="w-4 h-4" /> โหมดมืด
+                <Moon className="w-3.5 h-3.5" /> มืด
               </button>
               <button
                 onClick={() => handleTheme('light')}
-                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border-2 text-sm font-medium transition-all ${
+                className={`flex items-center justify-center gap-1.5 py-2 rounded-xl border-2 text-xs font-medium transition-all ${
                   theme === 'light' ? 'border-primary-500 bg-primary-500/10 text-white' : 'border-border bg-surface-700 text-zinc-400'
                 }`}
               >
-                <Sun className="w-4 h-4" /> โหมดสว่าง
+                <Sun className="w-3.5 h-3.5" /> สว่าง
+              </button>
+              <button
+                onClick={() => handleTheme('high-contrast')}
+                className={`flex items-center justify-center gap-1 py-2 rounded-xl border-2 text-xs font-medium transition-all ${
+                  theme === 'high-contrast' ? 'border-yellow-500 bg-yellow-550/10 text-yellow-400' : 'border-border bg-surface-700 text-zinc-400'
+                }`}
+                title="ธีมสีคอนทราสต์สูง (High Contrast)"
+              >
+                <Sun className="w-3.5 h-3.5 text-yellow-500" /> คอนทราสต์สูง
               </button>
             </div>
           </section>
@@ -163,6 +186,30 @@ export default function SettingsModal({ onClose }: Props) {
               </button>
               <span className="text-zinc-500 text-sm">px (10–20)</span>
             </div>
+          </section>
+
+          {/* Font Family */}
+          <section>
+            <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">แบบอักษร Editor</h3>
+            <select
+              value={fontFamily}
+              onChange={(e) => handleFontFamily(e.target.value)}
+              className="w-full px-3 py-2 bg-surface-700 border border-border rounded-xl text-sm text-white outline-none focus:border-primary-500 transition-colors"
+            >
+              {[
+                'JetBrains Mono',
+                'Fira Code',
+                'Source Code Pro',
+                'Inconsolata',
+                'Roboto Mono',
+                'Share Tech Mono',
+                'VT323'
+              ].map((f) => (
+                <option key={f} value={f} style={{ fontFamily: `"${f}", monospace` }}>
+                  {f}
+                </option>
+              ))}
+            </select>
           </section>
 
 
@@ -188,6 +235,20 @@ export default function SettingsModal({ onClose }: Props) {
                 <Zap className="w-4 h-4" /> ผู้เชี่ยวชาญ
               </button>
             </div>
+          </section>
+
+          {/* AI settings */}
+          <section>
+            <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider mb-3">ระบบช่วยเขียน AI</h3>
+            <label className="flex items-center gap-2 cursor-pointer select-none text-zinc-300 hover:text-white transition-colors text-sm">
+              <input
+                type="checkbox"
+                checked={inlineComplete}
+                onChange={(e) => handleToggleInlineComplete(e.target.checked)}
+                className="w-4 h-4 rounded border-border bg-surface-700 text-primary-500 accent-primary-500"
+              />
+              <span>AI Inline Autocomplete (Tab รับ · Esc ยกเลิก)</span>
+            </label>
           </section>
 
           {/* API Key */}
@@ -312,7 +373,7 @@ export default function SettingsModal({ onClose }: Props) {
           <div className="mt-6 pt-4 border-t border-border/40 flex flex-col items-center gap-1 opacity-60 text-center shrink-0">
             <p className="text-xs text-zinc-400 font-semibold">Nextcode IDE</p>
             <p className="text-[10px] text-zinc-500">
-              Designed by <span className="text-zinc-400 font-semibold">Kantapon</span> · Powered by Gemini 2.0 Flash
+              Designed by <span className="text-zinc-400 font-semibold">Kantapon</span> · Powered by Gemini 2.5 Flash Lite
             </p>
           </div>
         </div>

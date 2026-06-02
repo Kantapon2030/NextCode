@@ -4,7 +4,8 @@ const _ENV_KEY = import.meta.env.VITE_GEMINI_API_KEY ?? '';
 export const BUILTIN_KEY = _ENV_KEY;
 
 const GEMINI_BASE =
-  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent';
+import { aiRateLimiter, autocompleteRateLimiter } from './aiRateLimiter';
 
 const SYSTEM_PROMPT = `คุณคือ AI ผู้ช่วยเขียนโค้ดที่เชี่ยวชาญของ Nextcode IDE
 ตอบเป็นภาษาไทยเสมอ ยกเว้น code และ keyword ทางเทคนิค
@@ -74,69 +75,119 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 export async function callGemini(
   req: GeminiRequest,
   onRetry?: (attempt: number, waitSec: number) => void
-): Promise<GeminiResponse> {
-  const MAX_RETRIES = 3;
-  let delay = 5000;
+): Promise<GeminiResponse>;
 
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    const res = await fetch(`${GEMINI_BASE}?key=${req.apiKey}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: buildPrompt(req) }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.2,
-          maxOutputTokens: 8192,
-          topP: 0.8,
-        },
-      }),
+export async function callGemini(
+  prompt: string,
+  apiKey: string,
+  onStatus: (msg: string, ms: number) => void
+): Promise<string>;
+
+export async function callGemini(
+  first: GeminiRequest | string,
+  second?: any,
+  third?: (msg: string, ms: number) => void
+): Promise<GeminiResponse | string> {
+  if (typeof first === 'string') {
+    const prompt = first;
+    const apiKey = second as string;
+    const onStatus = third as (msg: string, ms: number) => void;
+
+    autocompleteRateLimiter.setStatusCallback(onStatus);
+
+    return autocompleteRateLimiter.enqueue(async () => {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${apiKey}`,
+        {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: {
+              temperature:     0.2,
+              maxOutputTokens: 8192,
+            },
+          }),
+        }
+      );
+
+      if (res.status === 429) {
+        throw new Error('429: Too Many Requests');
+      }
+      if (!res.ok) {
+        const body = await res.text();
+        if (res.status === 400) throw new Error(
+          'API Key ไม่ถูกต้อง — ตรวจสอบใน Settings ⚙'
+        );
+        throw new Error(`Gemini error ${res.status}: ${body}`);
+      }
+
+      const data = await res.json() as any;
+      return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
     });
+  } else {
+    const req = first as GeminiRequest;
+    const onRetry = second as ((attempt: number, waitSec: number) => void) | undefined;
 
-    // 429 → retry with backoff
-    if (res.status === 429) {
-      // ลองอ่าน Retry-After header ถ้ามี
-      const retryAfter = res.headers.get('Retry-After');
-      const waitMs = retryAfter ? parseInt(retryAfter) * 1000 : delay;
-
-      if (attempt < MAX_RETRIES) {
-        onRetry?.(attempt, Math.ceil(waitMs / 1000));
-        await sleep(waitMs);
-        delay = Math.min(delay * 2, 30_000); // max 30s
-        continue;
+    const onStatus = (msg: string, ms: number) => {
+      if (msg && onRetry) {
+        const match = msg.match(/\((\d+)\/\d+\)/);
+        const attempt = match ? parseInt(match[1]) : 1;
+        onRetry(attempt, Math.ceil(ms / 1000));
       }
-      throw new Error('Gemini API: Rate limit exceeded (429). Too many requests.');
-    }
-
-    if (!res.ok) {
-      const errBody = await res.json().catch(() => ({})) as {
-        error?: { message?: string };
-      };
-      const errMsg = errBody?.error?.message ?? '';
-      if (res.status === 403 || (res.status === 400 && errMsg.toLowerCase().includes('api key'))) {
-        throw new Error(`API_KEY_INVALID: ${errMsg || 'Invalid API Key'}`);
-      }
-      throw new Error(`Gemini ${res.status}: ${errMsg || 'Unknown API Error'}`);
-    }
-
-    const data = await res.json() as {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
-      error?: { message?: string };
     };
 
-    if (data.error) throw new Error(`Gemini: ${data.error.message}`);
+    aiRateLimiter.setStatusCallback(onStatus);
 
-    const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-    if (!text) throw new Error('EMPTY_RESPONSE');
+    const responseText = await aiRateLimiter.enqueue(async () => {
+      const res = await fetch(`${GEMINI_BASE}?key=${req.apiKey}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: buildPrompt(req) }],
+            },
+          ],
+          generationConfig: {
+            temperature: 0.2,
+            maxOutputTokens: 8192,
+            topP: 0.8,
+          },
+        }),
+      });
 
-    return parseResponse(text);
+      if (res.status === 429) {
+        throw new Error('429: Too Many Requests');
+      }
+
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({})) as {
+          error?: { message?: string };
+        };
+        const errMsg = errBody?.error?.message ?? '';
+        if (res.status === 403 || (res.status === 400 && errMsg.toLowerCase().includes('api key'))) {
+          throw new Error(`API_KEY_INVALID: ${errMsg || 'Invalid API Key'}`);
+        }
+        throw new Error(`Gemini ${res.status}: ${errMsg || 'Unknown API Error'}`);
+      }
+
+      const data = await res.json() as {
+        candidates?: { content?: { parts?: { text?: string }[] } }[];
+        error?: { message?: string };
+      };
+
+      if (data.error) throw new Error(`Gemini: ${data.error.message}`);
+
+      const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      if (!text) throw new Error('EMPTY_RESPONSE');
+
+      return text;
+    });
+
+    return parseResponse(responseText);
   }
-
-  throw new Error('Gemini API: Rate limit exceeded (429). Too many requests.');
 }
 
 function buildPrompt(req: GeminiRequest): string {

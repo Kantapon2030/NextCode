@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { callGemini, BUILTIN_KEY } from '../../services/geminiAI';
 import { getSetting } from '../../storage/db';
@@ -62,6 +62,40 @@ export function AIPanel({ onApplyFix }: Props) {
   const [includeWholeFile, setIncludeWholeFile] = useState(true);
   const [usingBuiltinKey, setUsingBuiltinKey]   = useState(false);
   const [statusMsg, setStatusMsg]           = useState('');   // เช่น "กำลัง retry ครั้งที่ 2..."
+  const [rateLimitMsg,      setRateLimitMsg]      = useState('');
+  const [rateLimitMs,       setRateLimitMs]        = useState(0);
+  const [rateLimitCountdown,setRateLimitCountdown] = useState(0);
+
+  // countdown timer:
+  useEffect(() => {
+    if (rateLimitMs <= 0) { setRateLimitCountdown(0); return; }
+    const start = Date.now();
+    const timer = setInterval(() => {
+      const left = rateLimitMs - (Date.now() - start);
+      if (left <= 0) {
+        setRateLimitCountdown(0);
+        clearInterval(timer);
+      } else {
+        setRateLimitCountdown(Math.ceil(left / 1000));
+      }
+    }, 500);
+    return () => clearInterval(timer);
+  }, [rateLimitMs]);
+
+  // Listen for hover explain symbol requests
+  useEffect(() => {
+    const handleExplainSymbol = (e: Event) => {
+      const symbol = (e as CustomEvent<{ symbol: string }>).detail?.symbol;
+      if (symbol) {
+        setAIMode('explain');
+        setInput(`ช่วยอธิบายคำสั่ง \`${symbol}\` ในการเขียนโปรแกรมอย่างละเอียด พร้อมยกตัวอย่างวิธีใช้ที่ถูกต้องให้หน่อย`);
+        setAIPanelOpen(true);
+      }
+    };
+    window.addEventListener('nextcode:explainSymbol', handleExplainSymbol);
+    return () => window.removeEventListener('nextcode:explainSymbol', handleExplainSymbol);
+  }, [setAIMode, setAIPanelOpen]);
+
   const [errorType, setErrorType]           = useState<
     'rate_limit' | 'invalid_key' | 'network' | null
   >(null);
@@ -76,22 +110,21 @@ export function AIPanel({ onApplyFix }: Props) {
 
   /** โหลด key ของผู้ใช้ → fallback built-in */
   async function resolveApiKey(): Promise<string> {
-    if (user) {
-      try {
-        const enc = await getSetting<{ iv: string; ciphertext: string } | null>(
-          `gemini_key_${user.id}`, null
-        );
-        if (enc) {
-          const plain = await decryptApiKey(enc.iv, enc.ciphertext, user.id);
-          const trimmed = plain?.trim();
-          if (trimmed) {
-            setUsingBuiltinKey(false);
-            return trimmed;
-          }
+    try {
+      const userId = user?.id || 'guest';
+      const enc = await getSetting<{ iv: string; ciphertext: string } | null>(
+        `gemini_key_${userId}`, null
+      );
+      if (enc) {
+        const plain = await decryptApiKey(enc.iv, enc.ciphertext, userId);
+        const trimmed = plain?.trim();
+        if (trimmed) {
+          setUsingBuiltinKey(false);
+          return trimmed;
         }
-      } catch (err) {
-        console.error('Failed to resolve custom API key:', err);
       }
+    } catch (err) {
+      console.error('Failed to resolve custom API key:', err);
     }
     setUsingBuiltinKey(true);
     return BUILTIN_KEY;
@@ -110,15 +143,21 @@ export function AIPanel({ onApplyFix }: Props) {
 
     try {
       setRawErrorDetails(null);
+      setRateLimitMsg('');
+      setRateLimitMs(0);
       const result = await callGemini(
         { apiKey, userInput: input, mode: aiMode, files, errors, includeWholeFile },
         (attempt, waitSec) => {
           // callback เมื่อ rate limit → กำลัง retry
           setStatusMsg(`⏳ Rate limit — กำลัง retry ครั้งที่ ${attempt} (รอ ${waitSec}s)...`);
+          setRateLimitMsg(`ถึง rate limit — รอ ${waitSec} วิ (${attempt}/4)`);
+          setRateLimitMs(waitSec * 1000);
         }
       );
       setAIResponse(result);
       setStatusMsg('');
+      setRateLimitMsg('');
+      setRateLimitMs(0);
       setErrorType(null);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -192,6 +231,7 @@ export function AIPanel({ onApplyFix }: Props) {
 
   return (
     <div
+      id="ide-ai-panel"
       className={`flex flex-col border-t shrink-0 ${bg}`}
       style={{ maxHeight: '48vh', minHeight: 220 }}
     >
@@ -200,7 +240,7 @@ export function AIPanel({ onApplyFix }: Props) {
         <Bot className="w-4 h-4 text-primary-400" />
         <span className="text-sm font-semibold text-white">AI ช่วยเขียนโค้ด</span>
         <span className="text-xs px-2 py-0.5 bg-primary-600/20 text-primary-400 rounded-full border border-primary-600/30">
-          Gemini 2.0
+          Gemini 2.5
         </span>
         {usingBuiltinKey && (
           <span className="flex items-center gap-1 text-xs text-zinc-600">
@@ -354,6 +394,26 @@ export function AIPanel({ onApplyFix }: Props) {
               <><Bot className="w-4 h-4" /> ส่งให้ AI</>
             )}
           </button>
+
+          {(rateLimitMsg || rateLimitCountdown > 0) && (
+            <div className="rate-limit-banner">
+              <div className="rate-limit-bar">
+                <div
+                  className="rate-limit-fill"
+                  style={{
+                    width: rateLimitMs > 0
+                      ? `${(rateLimitCountdown / (rateLimitMs/1000)) * 100}%`
+                      : '0%',
+                    transition: 'width 0.5s linear',
+                  }}
+                />
+              </div>
+              <span className="rate-limit-text">
+                ⏳ {rateLimitMsg}
+                {rateLimitCountdown > 0 && ` (${rateLimitCountdown}s)`}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Response */}

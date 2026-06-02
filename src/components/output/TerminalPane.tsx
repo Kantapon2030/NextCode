@@ -1,7 +1,8 @@
 import React, {
   useState, useRef, useEffect, useCallback
 } from 'react';
-import { Play, Square, Trash2, Terminal } from 'lucide-react';
+import { Play, Square, Trash2, Terminal, History } from 'lucide-react';
+import { getTerminalHistory, saveTerminalHistory } from '../../storage/db';
 import type { TerminalEntry } from '../../store/appStore';
 import { useAppStore } from '../../store/appStore';
 import {
@@ -32,11 +33,26 @@ export const TerminalPane: React.FC<Props> = ({
   const {
     vfs, activeLanguage, 
     terminalOutput, addTerminalEntry, setTerminalOutput, clearTerminal,
+    currentProject,
   } = useAppStore();
+  const projectId = currentProject?.id;
 
   const [phase,        setPhase]        = useState<Phase>('idle');
   const [inputValue,   setInputValue]   = useState('');
   const [isWaiting,    setIsWaiting]    = useState(false);
+  const [history,      setHistory]      = useState<any[]>([]);
+  const [showHistory,  setShowHistory]  = useState(false);
+
+  const loadHistory = useCallback(async () => {
+    if (projectId) {
+      const list = await getTerminalHistory(projectId);
+      setHistory(list);
+    }
+  }, [projectId]);
+
+  useEffect(() => {
+    loadHistory();
+  }, [loadHistory]);
 
   const outputRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLInputElement>(null);
@@ -268,6 +284,12 @@ export const TerminalPane: React.FC<Props> = ({
     if (!isWaiting) return;
     const val = inputValue; // allow empty strings
 
+    if (projectId && val.trim()) {
+      saveTerminalHistory(projectId, val).then(() => {
+        loadHistory();
+      });
+    }
+
     // echo
     smartAppend(val + '\n', 'input-echo');
     setInputValue('');
@@ -286,7 +308,7 @@ export const TerminalPane: React.FC<Props> = ({
         (inputRef as any)._resolve = null;
       }
     }
-  }, [isWaiting, inputValue, language, smartAppend]);
+  }, [isWaiting, inputValue, language, smartAppend, projectId, loadHistory]);
 
   const handleKeyDown = (
     e: React.KeyboardEvent<HTMLInputElement>
@@ -343,6 +365,39 @@ export const TerminalPane: React.FC<Props> = ({
           </span>
         )}
         <div style={{ flex: 1 }} />
+        <div style={{ position: 'relative' }}>
+          <button
+            className={`btn-term-ghost flex items-center gap-1 text-[11px] py-1 px-1.5 mr-1 ${showHistory ? 'bg-surface-700 text-primary-400' : ''}`}
+            onClick={() => setShowHistory(!showHistory)}
+            title="ประวัติการป้อนคำสั่ง"
+          >
+            <History size={12} />
+            <span>ประวัติ</span>
+          </button>
+          
+          {showHistory && (
+            <div className="absolute right-0 top-7 w-48 max-h-40 overflow-y-auto bg-surface-900 border border-border rounded-lg shadow-xl z-50 py-1 text-xs">
+              {history.length === 0 ? (
+                <div className="px-3 py-2 text-zinc-500 italic">ไม่มีประวัติ</div>
+              ) : (
+                history.map((h, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      setInputValue(h.input);
+                      setShowHistory(false);
+                      if (inputRef.current) inputRef.current.focus();
+                    }}
+                    className="w-full text-left px-3 py-1.5 hover:bg-surface-700 hover:text-zinc-100 text-zinc-300 truncate transition-colors"
+                    title={h.input}
+                  >
+                    {h.input}
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
         <button
           className="btn-term-ghost"
           onClick={handleClear}

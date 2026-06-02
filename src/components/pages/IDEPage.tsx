@@ -20,6 +20,9 @@ import { buildPreview } from '../../utils/blobHelpers';
 import { TerminalPane } from '../output/TerminalPane';
 import { AIPanel } from '../ai/AIPanel';
 import { CommandPalette } from '../modals/CommandPalette';
+import { SearchInFilesModal } from '../modals/SearchInFilesModal';
+import { OnboardingTour } from '../shared/OnboardingTour';
+import ShortcutCheatsheet from '../modals/ShortcutCheatsheet';
 import { Code2, Edit3, FileText, Bot } from 'lucide-react';
 
 // Debounce helper
@@ -69,7 +72,43 @@ export default function IDEPage() {
   const isDraggingSidebar = useRef(false);
   const [showNewFileModal, setShowNewFileModal] = useState(false);
   const [newFileInput, setNewFileInput] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const editorContainerRef = useRef<HTMLDivElement>(null);
+
+  // Ctrl+Shift+F สำหรับเปิดการค้นหาในไฟล์
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key?.toLowerCase() === 'f') {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
+
+  // ? สำหรับเปิด Shortcut Cheatsheet
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable ||
+        target.classList.contains('inputarea')
+      ) {
+        return;
+      }
+      if (e.key === '?') {
+        e.preventDefault();
+        setCheatsheetOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
 
   // Mobile tabs
   const [mobileTab, setMobileTab] = useState<'editor' | 'preview' | 'files' | 'ai'>('editor');
@@ -307,7 +346,7 @@ export default function IDEPage() {
       {/* Main layout */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar — desktop */}
-        <div className="hidden md:flex flex-col shrink-0 overflow-hidden" style={{ width: sidebarWidth }}>
+        <div id="ide-sidebar" className="hidden md:flex flex-col shrink-0 overflow-hidden" style={{ width: sidebarWidth }}>
           <ErrorBoundary>
             <FileTree
               projectId={projectId!}
@@ -349,7 +388,7 @@ export default function IDEPage() {
           {/* Editor + Preview row */}
           <div className="flex-1 flex overflow-hidden">
             {/* Editor */}
-            <div className="flex-1 relative overflow-hidden" ref={editorContainerRef}>
+            <div id="ide-editor" className="flex-1 relative overflow-hidden" ref={editorContainerRef}>
               {openTabs.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-zinc-600">
                   <Code2 className="w-12 h-12 mb-4" />
@@ -377,7 +416,7 @@ export default function IDEPage() {
             </div>
 
             {/* Output panel — desktop */}
-            <div className="hidden md:flex flex-col shrink-0" style={{ width: outputPanelWidth }}>
+            <div id="ide-output-panel" className="hidden md:flex flex-col shrink-0" style={{ width: outputPanelWidth }}>
               <ErrorBoundary>
                 {previewMode === 'web' ? (
                   <PreviewPane
@@ -481,6 +520,19 @@ export default function IDEPage() {
           onSave={handleManualSave}
           onToggleAI={() => setAIPanelOpen(!aiPanelOpen)}
         />
+      )}
+
+      {/* Search In Files Modal */}
+      {searchOpen && (
+        <SearchInFilesModal onClose={() => setSearchOpen(false)} />
+      )}
+
+      {/* Onboarding Tour */}
+      <OnboardingTour />
+
+      {/* Shortcut Cheatsheet */}
+      {cheatsheetOpen && (
+        <ShortcutCheatsheet onClose={() => setCheatsheetOpen(false)} />
       )}
     </div>
   );

@@ -853,7 +853,7 @@ export default function Dashboard() {
       <footer className="text-center py-6 text-zinc-600 text-xs border-t border-border/10 mt-auto shrink-0">
         <div className="flex flex-col items-center justify-center gap-1">
           <p>Designed & Developed by <span className="text-zinc-400 font-semibold">Kantapon</span></p>
-          <p className="opacity-65 text-[10px]">Powered by Gemini 2.0 Flash</p>
+          <p className="opacity-65 text-[10px]">Powered by Gemini 2.5 Flash Lite</p>
         </div>
       </footer>
 

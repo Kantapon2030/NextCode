@@ -72,6 +72,22 @@ body {
   background: #d4d4d8;
 }
 
+/* ─── High Contrast overrides ─────────────────── */
+.high-contrast {
+  --bg-primary: #000000;
+  --bg-surface: #000000;
+  --bg-border: #ffffff;
+  --accent: #eab308; /* yellow-500 */
+  --text-primary: #ffffff;
+}
+.high-contrast body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+}
+.high-contrast ::-webkit-scrollbar-thumb {
+  background: #ffffff;
+}
+
 /* ─── Monaco Editor override ──────────────────── */
 .monaco-editor .margin {
   background: transparent !important;
@@ -454,4 +470,46 @@ body {
 @keyframes spin-bounce {
   0%,80%,100% { opacity: .2; transform: translateY(0); }
   40%          { opacity: 1;  transform: translateY(-4px); }
+}
+
+/* ── Rate Limit Banner ── */
+.rate-limit-banner {
+  padding: 8px 12px;
+  background: rgba(251,191,36,.08);
+  border: 0.5px solid rgba(251,191,36,.3);
+  border-radius: var(--border-radius-md);
+  margin-top: 8px;
+}
+.rate-limit-bar {
+  height: 3px;
+  background: rgba(251,191,36,.2);
+  border-radius: 2px;
+  margin-bottom: 6px;
+  overflow: hidden;
+}
+.rate-limit-fill {
+  height: 100%;
+  background: #fbbf24;
+  border-radius: 2px;
+}
+.rate-limit-text {
+  font-size: 12px;
+  color: var(--color-text-warning);
+}
+
+/* ── Ghost Text Styles ── */
+.ghost-text-inline {
+  color: var(--color-text-tertiary) !important;
+  font-style: italic;
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.monaco-editor .ghost-text-hint {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  padding: 2px 6px;
+  background: var(--color-background-secondary);
+  border: 0.5px solid var(--color-border-tertiary);
+  border-radius: 4px;
 }
