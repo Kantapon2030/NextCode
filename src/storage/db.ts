@@ -295,12 +295,7 @@ export async function deleteProjectFromDB(projectId: string): Promise<void> {
   await db.projects.delete(projectId);
 }
 
-/** ลบ deploy history ของโปรเจกต์ (ใช้แยกเพราะไม่อยู่ใน transaction เดียวกัน) */
-export async function deleteProjectDeployHistory(projectId: string): Promise<void> {
-  if (db.deploy_history) {
-    await db.deploy_history.where('project_id').equals(projectId).delete();
-  }
-}
+
 
 export async function getTerminalHistory(projectId: string): Promise<TerminalRunHistoryEntry[]> {
   if (!db.terminal_run_history) return [];

@@ -8,6 +8,8 @@ import { toast } from '../shared/Toast';
 import { LoadingSpinner, SkeletonCard } from '../shared/LoadingSpinner';
 import NewProjectModal from '../modals/NewProjectModal';
 import SettingsModal from '../modals/SettingsModal';
+import { forceCloudSync } from '../../services/cloudSync';
+import { ConflictResolverModal } from '../modals/ConflictResolverModal';
 import {
   readDroppedItems, detectLanguage, isImage, isTextFile, getMimeType,
 } from '../../utils/folderImport';
@@ -51,7 +53,7 @@ function relativeTime(ms: number): string {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { user, accessToken, projects, setProjects, addProject, removeProject, logout, theme, supabaseUser, currentProject, resetWorkspace, setCurrentProject, setSyncStatus } = useAppStore();
+  const { user, accessToken, projects, setProjects, addProject, removeProject, logout, theme, supabaseUser, currentProject, resetWorkspace, setCurrentProject, setSyncStatus, syncStatus } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<string>('all');
@@ -67,6 +69,43 @@ export default function Dashboard() {
   const [syncError, setSyncError] = useState<string | null>(null);
   const avatarRef = useRef<HTMLDivElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+
+  const [syncing, setSyncing] = useState(false);
+  const [conflicts, setConflicts] = useState<any[]>([]);
+  const [showConflictModal, setShowConflictModal] = useState(false);
+  const conflictResolverRef = useRef<((res: Record<string, 'local' | 'cloud'>) => void) | null>(null);
+
+  async function handleForceSync() {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await forceCloudSync(async (detectedConflicts) => {
+        setConflicts(detectedConflicts);
+        setShowConflictModal(true);
+        return new Promise<Record<string, 'local' | 'cloud'>>((resolve) => {
+          conflictResolverRef.current = resolve;
+        });
+      });
+      toast('success', '✓ ซิงก์ข้อมูลขึ้นคลาวด์เสร็จสมบูรณ์');
+      
+      // Reload projects list after sync
+      const projs = await db.projects.orderBy('updated_at').reverse().toArray();
+      setProjects(projs as any);
+    } catch (err) {
+      console.error(err);
+      toast('error', '❌ ซิงก์ข้อมูลล้มเหลว: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  const handleResolveConflicts = (resolutions: Record<string, 'local' | 'cloud'>) => {
+    if (conflictResolverRef.current) {
+      conflictResolverRef.current(resolutions);
+      conflictResolverRef.current = null;
+    }
+    setShowConflictModal(false);
+  };
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -523,6 +562,23 @@ export default function Dashboard() {
           โปรเจกต์ใหม่
         </button>
 
+        {(getGitHubToken() || accessToken) && (
+          <button
+            onClick={handleForceSync}
+            disabled={syncStatus === 'syncing' || syncing}
+            className="p-2 hover:bg-surface-700 rounded-lg transition-colors text-zinc-400 disabled:opacity-50"
+            title="กดเพื่อบังคับซิงก์ข้อมูลขึ้น Cloud ทันที"
+          >
+            {(syncStatus === 'syncing' || syncing) ? (
+              <Loader2 className="w-5 h-5 animate-spin text-blue-400" />
+            ) : syncStatus === 'error' ? (
+              <CloudOff className="w-5 h-5 text-red-400" />
+            ) : (
+              <Cloud className="w-5 h-5 text-green-400" />
+            )}
+          </button>
+        )}
+
         <button
           onClick={() => setShowSettings(true)}
           className="p-2 hover:bg-surface-700 rounded-lg transition-colors text-zinc-400"
@@ -866,6 +922,13 @@ export default function Dashboard() {
             window.location.reload();
           }}
           onSkip={() => setShowGhLogin(false)}
+        />
+      )}
+      {showConflictModal && (
+        <ConflictResolverModal
+          conflicts={conflicts}
+          onResolve={handleResolveConflicts}
+          onClose={() => setShowConflictModal(false)}
         />
       )}
     </div>

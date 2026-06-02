@@ -13,6 +13,8 @@ import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { db } from '../../storage/db';
 import { getGitHubToken } from '../../services/githubAuth';
+import { forceCloudSync } from '../../services/cloudSync';
+import { ConflictResolverModal } from '../modals/ConflictResolverModal';
 
 interface Props {
   onSave: () => void;
@@ -32,6 +34,39 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
   const projectRef = useRef<HTMLDivElement>(null);
   const exportRef = useRef<HTMLDivElement>(null);
   const avatarRef = useRef<HTMLDivElement>(null);
+
+  const [syncing, setSyncing] = useState(false);
+  const [conflicts, setConflicts] = useState<any[]>([]);
+  const [showConflictModal, setShowConflictModal] = useState(false);
+  const conflictResolverRef = useRef<((res: Record<string, 'local' | 'cloud'>) => void) | null>(null);
+
+  async function handleForceSync() {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      await forceCloudSync(async (detectedConflicts) => {
+        setConflicts(detectedConflicts);
+        setShowConflictModal(true);
+        return new Promise<Record<string, 'local' | 'cloud'>>((resolve) => {
+          conflictResolverRef.current = resolve;
+        });
+      });
+      toast('success', '✓ ซิงก์ข้อมูลขึ้นคลาวด์เสร็จสมบูรณ์');
+    } catch (err) {
+      console.error(err);
+      toast('error', '❌ ซิงก์ข้อมูลล้มเหลว: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  const handleResolveConflicts = (resolutions: Record<string, 'local' | 'cloud'>) => {
+    if (conflictResolverRef.current) {
+      conflictResolverRef.current(resolutions);
+      conflictResolverRef.current = null;
+    }
+    setShowConflictModal(false);
+  };
 
   useEffect(() => {
     function close(e: MouseEvent) {
@@ -140,12 +175,22 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
         <div className="flex-1" />
 
         {(getGitHubToken() || accessToken) && (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-400" title="สถานะ Cloud Sync">
-            {syncStatus === 'synced' && <><Cloud className="w-4 h-4 text-green-400" /> <span className="hidden sm:inline">บันทึกคลาวด์แล้ว</span></>}
-            {syncStatus === 'syncing' && <><Loader2 className="w-4 h-4 animate-spin text-blue-400" /> <span className="hidden sm:inline">กำลัง sync...</span></>}
-            {syncStatus === 'local' && <><CloudOff className="w-4 h-4 text-yellow-400" /> <span className="hidden sm:inline">เฉพาะเครื่องนี้</span></>}
-            {syncStatus === 'error' && <><CloudOff className="w-4 h-4 text-red-400" /> <span className="hidden sm:inline">Sync ไม่สำเร็จ</span></>}
-          </div>
+          <button
+            onClick={handleForceSync}
+            disabled={syncStatus === 'syncing' || syncing}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-zinc-400 hover:text-white hover:bg-surface-800 rounded-lg transition-colors disabled:opacity-50"
+            title="กดเพื่อบังคับซิงก์ข้อมูลขึ้น Cloud ทันที"
+          >
+            {(syncStatus === 'syncing' || syncing) ? (
+              <><Loader2 className="w-4 h-4 animate-spin text-blue-400" /> <span className="hidden sm:inline">กำลังซิงก์...</span></>
+            ) : syncStatus === 'synced' ? (
+              <><Cloud className="w-4 h-4 text-green-400" /> <span className="hidden sm:inline">บันทึกคลาวด์แล้ว (กดเพื่อซิงก์ใหม่)</span></>
+            ) : syncStatus === 'error' ? (
+              <><CloudOff className="w-4 h-4 text-red-400" /> <span className="hidden sm:inline">ซิงก์ล้มเหลว (กดเพื่อลองใหม่)</span></>
+            ) : (
+              <><CloudOff className="w-4 h-4 text-yellow-400" /> <span className="hidden sm:inline">เฉพาะเครื่องนี้ (กดเพื่อซิงก์)</span></>
+            )}
+          </button>
         )}
 
         {/* Save button */}
@@ -262,6 +307,13 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
         </div>
       </nav>
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
+      {showConflictModal && (
+        <ConflictResolverModal
+          conflicts={conflicts}
+          onResolve={handleResolveConflicts}
+          onClose={() => setShowConflictModal(false)}
+        />
+      )}
     </>
   );
 }
