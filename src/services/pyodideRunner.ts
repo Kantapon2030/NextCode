@@ -7,8 +7,8 @@ export type WaitingInputHandler = (prompt: string) => void;
 
 interface PyodideWorkerSession {
   worker:       Worker;
-  sharedBuffer: SharedArrayBuffer;
-  statusArray:  Int32Array;
+  sharedBuffer: SharedArrayBuffer | null;
+  statusArray:  Int32Array | null;
 }
 
 let session: PyodideWorkerSession | null = null;
@@ -22,16 +22,6 @@ export async function initPyodideWorker(
   onDone: (exitCode: number) => void
 ): Promise<void> {
 
-  // ตรวจว่า SharedArrayBuffer ใช้ได้
-  if (typeof SharedArrayBuffer === 'undefined') {
-    onOutput(
-      '❌ browser ไม่รองรับ SharedArrayBuffer\\n' +
-      'ต้องเปิดด้วย HTTPS และมี COOP/COEP headers',
-      'error'
-    );
-    return;
-  }
-
   // terminate worker เก่า
   if (session) {
     session.worker.terminate();
@@ -39,10 +29,23 @@ export async function initPyodideWorker(
     workerReady = false;
   }
 
-  // SharedArrayBuffer: 4 bytes status + 1024 bytes input
-  const sharedBuffer = new SharedArrayBuffer(4 + 1024);
-  const statusArray  = new Int32Array(sharedBuffer, 0, 1);
-  Atomics.store(statusArray, 0, 0);
+  const hasSharedBuffer = typeof SharedArrayBuffer !== 'undefined';
+  let sharedBuffer: SharedArrayBuffer | null = null;
+  let statusArray: Int32Array | null = null;
+
+  if (hasSharedBuffer) {
+    // SharedArrayBuffer: 4 bytes status + 1024 bytes input
+    sharedBuffer = new SharedArrayBuffer(4 + 1024);
+    statusArray  = new Int32Array(sharedBuffer, 0, 1);
+    Atomics.store(statusArray, 0, 0);
+  } else {
+    // แจ้งเตือนสั้นๆ เป็น Info
+    onOutput(
+      'ℹ️ คำเตือน: เบราว์เซอร์นี้ไม่รองรับ SharedArrayBuffer (ไม่ได้เปิดผ่าน HTTPS/localhost หรือขาด COOP/COEP headers)\n' +
+      '👉 คุณยังคงรันโค้ด Python ทั่วไปได้ปกติ แต่จะไม่สามารถใช้คำสั่ง input() เพื่อรับค่าจากคีย์บอร์ดได้\n\n',
+      'info'
+    );
+  }
 
   const worker = new Worker('/pythonWorker.js');
 
@@ -73,7 +76,7 @@ export async function initPyodideWorker(
   // init worker
   worker.postMessage({
     type: 'INIT',
-    payload: { sharedBuffer },
+    payload: { sharedBuffer, hasSharedBuffer },
   });
 }
 

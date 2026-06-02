@@ -12,9 +12,12 @@ self.onmessage = async (e) => {
 
   if (type === 'INIT') {
     // รับ SharedArrayBuffer จาก main thread
-    sharedBuffer = payload.sharedBuffer;
-    statusArray  = new Int32Array(sharedBuffer, 0, 4);
-    inputArray   = new Uint16Array(sharedBuffer, 16, 512);
+    const { hasSharedBuffer } = payload;
+    if (hasSharedBuffer) {
+      sharedBuffer = payload.sharedBuffer;
+      statusArray  = new Int32Array(sharedBuffer, 0, 4);
+      inputArray   = new Uint16Array(sharedBuffer, 16, 512);
+    }
 
     // โหลด Pyodide
     self.postMessage({ type: 'OUTPUT', text: 'กำลังโหลด Python...', outputType: 'info' });
@@ -38,8 +41,9 @@ self.onmessage = async (e) => {
       }
     });
 
-    // inject mock input ที่ใช้ Atomics.wait
-    await pyodide.runPythonAsync(`
+    // inject mock input
+    if (hasSharedBuffer) {
+      await pyodide.runPythonAsync(`
 import builtins
 import js
 
@@ -71,35 +75,45 @@ def _blocking_input(prompt=''):
 builtins.input = _blocking_input
 `);
 
-    // วาง JS helpers ใน Python namespace
-    pyodide.globals.set('_notify_waiting_input', (prompt) => {
-      // set status = 1 (waiting)
-      Atomics.store(statusArray, 0, 1);
-      self.postMessage({ type: 'WAITING_INPUT', prompt: prompt || '' });
-    });
+      // วาง JS helpers ใน Python namespace
+      pyodide.globals.set('_notify_waiting_input', (prompt) => {
+        // set status = 1 (waiting)
+        Atomics.store(statusArray, 0, 1);
+        self.postMessage({ type: 'WAITING_INPUT', prompt: prompt || '' });
+      });
 
-    pyodide.globals.set('_atomics_wait', () => {
-      // block จนกว่า status เปลี่ยนจาก 1 → 2
-      while (Atomics.load(statusArray, 0) !== 2) {
-        Atomics.wait(statusArray, 0, 1, 50); // timeout 50ms
-      }
-    });
+      pyodide.globals.set('_atomics_wait', () => {
+        // block จนกว่า status เปลี่ยนจาก 1 → 2
+        while (Atomics.load(statusArray, 0) !== 2) {
+          Atomics.wait(statusArray, 0, 1, 50); // timeout 50ms
+        }
+      });
 
-    pyodide.globals.set('_read_input_value', () => {
-      // อ่าน string จาก inputArray
-      let end = 0;
-      while (end < inputArray.length && inputArray[end] !== 0) {
-        end++;
-      }
-      return String.fromCharCode(...inputArray.slice(0, end));
-    });
+      pyodide.globals.set('_read_input_value', () => {
+        // อ่าน string จาก inputArray
+        let end = 0;
+        while (end < inputArray.length && inputArray[end] !== 0) {
+          end++;
+        }
+        return String.fromCharCode(...inputArray.slice(0, end));
+      });
 
-    pyodide.globals.set('_reset_status', () => {
-      // ล้าง input buffer
-      inputArray.fill(0);
-      // reset status → 0 (idle)
-      Atomics.store(statusArray, 0, 0);
-    });
+      pyodide.globals.set('_reset_status', () => {
+        // ล้าง input buffer
+        inputArray.fill(0);
+        // reset status → 0 (idle)
+        Atomics.store(statusArray, 0, 0);
+      });
+    } else {
+      await pyodide.runPythonAsync(`
+import builtins
+
+def _fallback_input(prompt=''):
+    raise OSError("เบราว์เซอร์นี้ไม่รองรับการรับค่าผ่าน input() เนื่องจากระบบความปลอดภัยของเบราว์เซอร์บล็อก SharedArrayBuffer (กรุณาใช้งานผ่าน HTTPS หรือ localhost)")
+
+builtins.input = _fallback_input
+`);
+    }
 
     self.postMessage({ type: 'READY' });
   }
@@ -119,13 +133,13 @@ builtins.input = _blocking_input
     } catch (err) {
       // clean up traceback
       const msg = String(err)
-        .split('\\n')
+        .split('\n')
         .filter(l =>
           !l.includes('_pyodide') &&
           !l.includes('CodeRunner') &&
           !l.includes('run_async')
         )
-        .join('\\n')
+        .join('\n')
         .trim();
       self.postMessage({ type: 'OUTPUT', text: msg, outputType: 'error' });
       self.postMessage({ type: 'DONE', exitCode: 1 });
@@ -133,26 +147,30 @@ builtins.input = _blocking_input
   }
 
   else if (type === 'SEND_INPUT') {
-    // ผู้ใช้กด Enter → เขียนค่าลง SharedArrayBuffer
-    const { value } = payload;
-    const chars = value.split('').map(c => c.charCodeAt(0));
+    if (statusArray && inputArray) {
+      // ผู้ใช้กด Enter → เขียนค่าลง SharedArrayBuffer
+      const { value } = payload;
+      const chars = value.split('').map(c => c.charCodeAt(0));
 
-    // เขียน string
-    inputArray.fill(0);
-    chars.forEach((c, i) => {
-      if (i < inputArray.length - 1) inputArray[i] = c;
-    });
+      // เขียน string
+      inputArray.fill(0);
+      chars.forEach((c, i) => {
+        if (i < inputArray.length - 1) inputArray[i] = c;
+      });
 
-    // set status = 2 (input ready) → Worker จะ unblock
-    Atomics.store(statusArray, 0, 2);
-    // notify Worker
-    Atomics.notify(statusArray, 0);
+      // set status = 2 (input ready) → Worker จะ unblock
+      Atomics.store(statusArray, 0, 2);
+      // notify Worker
+      Atomics.notify(statusArray, 0);
+    }
   }
 
   else if (type === 'STOP') {
-    // force unblock ด้วย empty input
-    inputArray.fill(0);
-    Atomics.store(statusArray, 0, 2);
-    Atomics.notify(statusArray, 0);
+    if (inputArray && statusArray) {
+      // force unblock ด้วย empty input
+      inputArray.fill(0);
+      Atomics.store(statusArray, 0, 2);
+      Atomics.notify(statusArray, 0);
+    }
   }
 };
