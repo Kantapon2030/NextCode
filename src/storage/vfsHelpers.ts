@@ -413,8 +413,11 @@ export function getMimeType(filename: string): string {
     jpeg: 'image/jpeg',
     gif: 'image/gif',
     webp: 'image/webp',
+    ico: 'image/x-icon',
+    bmp: 'image/bmp',
+    avif: 'image/avif',
   };
-  return map[ext] ?? 'text/plain';
+  return map[ext] ?? 'application/octet-stream';
 }
 
 export function getMonacoLanguage(filename: string): string {
@@ -443,5 +446,5 @@ export function isTextFile(filename: string): boolean {
 
 export function isImageFile(filename: string): boolean {
   const ext = filename.split('.').pop()?.toLowerCase() ?? '';
-  return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
+  return ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico', 'bmp', 'avif'].includes(ext);
 }

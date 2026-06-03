@@ -20,6 +20,7 @@ export interface SerializedProject {
   files:     Record<string, {
     content:  string;
     mime_type: string;
+    encoding?: 'base64';
   }>;
 }
 
@@ -201,15 +202,48 @@ export function mergeProjects(
     .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  const chunkSize = 8192;
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = bytes.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+  }
+  return window.btoa(binary);
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binaryString = window.atob(base64);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes.buffer;
+}
+
 export async function loadLocalProjects(): Promise<SerializedProject[]> {
   const projs = await db.projects.toArray();
   const allFiles = await db.files.toArray();
   
   return projs.map(p => {
     const projFiles = allFiles.filter(f => f.project_id === p.id && f.type === 'file' && f.content !== undefined);
-    const filesRecord: Record<string, { content: string, mime_type: string }> = {};
+    const filesRecord: Record<string, { content: string, mime_type: string, encoding?: 'base64' }> = {};
     for (const f of projFiles) {
-      filesRecord[f.path] = { content: f.content as string, mime_type: f.mime_type ?? 'text/plain' };
+      if (f.content instanceof ArrayBuffer) {
+        filesRecord[f.path] = {
+          content: arrayBufferToBase64(f.content),
+          mime_type: f.mime_type ?? 'application/octet-stream',
+          encoding: 'base64'
+        };
+      } else {
+        filesRecord[f.path] = {
+          content: (f.content as string) || '',
+          mime_type: f.mime_type ?? 'text/plain'
+        };
+      }
     }
     return {
       id: p.id,
@@ -248,8 +282,23 @@ export async function saveProjectToLocal(sp: SerializedProject): Promise<Project
   for (const [path, fileData] of Object.entries(sp.files)) {
     const existingCollection = db.files.where({ project_id: sp.id, path });
     const existing = await existingCollection.first();
+    
+    let contentToSave: string | ArrayBuffer = '';
+    if (typeof fileData.content === 'object' && fileData.content !== null) {
+      contentToSave = new ArrayBuffer(0);
+    } else if (fileData.encoding === 'base64') {
+      try {
+        contentToSave = base64ToArrayBuffer(fileData.content);
+      } catch (err) {
+        console.error('Failed to decode base64 file:', path, err);
+        contentToSave = new ArrayBuffer(0);
+      }
+    } else {
+      contentToSave = fileData.content || '';
+    }
+
     if (existing) {
-       await db.files.where({ project_id: sp.id, path }).modify({ content: fileData.content, mime_type: fileData.mime_type, updated_at: sp.updatedAt });
+       await db.files.where({ project_id: sp.id, path }).modify({ content: contentToSave, mime_type: fileData.mime_type, updated_at: sp.updatedAt });
     } else {
        await db.files.add({
          project_id: sp.id,
@@ -257,7 +306,7 @@ export async function saveProjectToLocal(sp: SerializedProject): Promise<Project
          name: path.split('/').pop() || '',
          parent_path: path.split('/').slice(0, -1).join('/'),
          type: 'file',
-         content: fileData.content,
+         content: contentToSave,
          mime_type: fileData.mime_type,
          is_dirty: false,
          updated_at: sp.updatedAt
@@ -270,9 +319,20 @@ export async function saveProjectToLocal(sp: SerializedProject): Promise<Project
 export async function serializeProject(p: Project): Promise<SerializedProject> {
   const allFiles = await db.files.where({ project_id: p.id }).toArray();
   const projFiles = allFiles.filter(f => f.type === 'file' && f.content !== undefined);
-  const filesRecord: Record<string, { content: string, mime_type: string }> = {};
+  const filesRecord: Record<string, { content: string, mime_type: string, encoding?: 'base64' }> = {};
   for (const f of projFiles) {
-    filesRecord[f.path] = { content: f.content as string, mime_type: f.mime_type ?? 'text/plain' };
+    if (f.content instanceof ArrayBuffer) {
+      filesRecord[f.path] = {
+        content: arrayBufferToBase64(f.content),
+        mime_type: f.mime_type ?? 'application/octet-stream',
+        encoding: 'base64'
+      };
+    } else {
+      filesRecord[f.path] = {
+        content: (f.content as string) || '',
+        mime_type: f.mime_type ?? 'text/plain'
+      };
+    }
   }
   return {
     id: p.id,

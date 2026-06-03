@@ -4,7 +4,7 @@ import { useAppStore } from '../../store/appStore';
 import { db } from '../../storage/db';
 import {
   loadVFS, saveVFSFile, deleteVFSFile, saveVFSAsset,
-  getMimeType, getMonacoLanguage
+  getMimeType, getMonacoLanguage, isImageFile
 } from '../../storage/vfsHelpers';
 import { broadcastVFSUpdate, initBroadcastChannel } from '../../storage/syncManager';
 import { ErrorBoundary } from '../shared/ErrorBoundary';
@@ -24,6 +24,7 @@ import { SearchInFilesModal } from '../modals/SearchInFilesModal';
 import { OnboardingTour } from '../shared/OnboardingTour';
 import ShortcutCheatsheet from '../modals/ShortcutCheatsheet';
 import { Code2, Edit3, FileText, Bot } from 'lucide-react';
+import { ImagePreview } from '../editor/ImagePreview';
 
 // Debounce helper
 function useDebouncedCallback<T extends unknown[]>(
@@ -398,17 +399,21 @@ export default function IDEPage() {
                 openTabs.map((tab) => (
                   <ErrorBoundary key={tab}>
                     <div className="h-full" style={{ display: tab === activeTab ? 'block' : 'none' }}>
-                      <MonacoWrapper
-                        filename={tab}
-                        content={vfs.files[tab]?.content ?? ''}
-                        isActive={tab === activeTab}
-                        onChange={(val) => handleFileChange(tab, val)}
-                        onCursorChange={(line, col) => { setCursorLine(line); setCursorCol(col); }}
-                        onSave={handleManualSave}
-                        onRun={() => {}}
-                        onToggleAI={() => setAIPanelOpen(!aiPanelOpen)}
-                        markers={tab === activeTab ? compileErrors : []}
-                      />
+                      {isImageFile(tab) && !tab.toLowerCase().endsWith('.svg') ? (
+                        <ImagePreview filename={tab} vfs={vfs} />
+                      ) : (
+                        <MonacoWrapper
+                          filename={tab}
+                          content={vfs.files[tab]?.content ?? ''}
+                          isActive={tab === activeTab}
+                          onChange={(val) => handleFileChange(tab, val)}
+                          onCursorChange={(line, col) => { setCursorLine(line); setCursorCol(col); }}
+                          onSave={handleManualSave}
+                          onRun={() => {}}
+                          onToggleAI={() => setAIPanelOpen(!aiPanelOpen)}
+                          markers={tab === activeTab ? compileErrors : []}
+                        />
+                      )}
                     </div>
                   </ErrorBoundary>
                 ))

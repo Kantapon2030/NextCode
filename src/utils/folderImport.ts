@@ -100,10 +100,10 @@ export async function readDroppedItems(
 
 // ─── Content-type helpers ─────────────────────────────────────
 
-const IMAGE_EXTS = new Set(['png','jpg','jpeg','gif','webp','svg','ico','bmp','avif']);
+const IMAGE_EXTS = new Set(['png','jpg','jpeg','gif','webp','ico','bmp','avif']);
 const TEXT_EXTS  = new Set([
   'html','htm','css','js','ts','jsx','tsx','py','c','cpp','h','hpp',
-  'txt','md','json','xml','yaml','yml','toml','sh','bash',
+  'txt','md','json','xml','yaml','yml','toml','sh','bash','svg',
 ]);
 
 export function isImage(filename: string): boolean {
