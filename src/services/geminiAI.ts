@@ -261,3 +261,111 @@ export async function testApiKey(apiKey: string): Promise<TestKeyResult> {
     return { status: 'invalid', errorDetails: e.message || String(e) };
   }
 }
+
+// ─── Multi-turn Chat API (ใหม่ — ประหยัด token) ───────────────────────────────
+
+import type { CodeChange } from '../types/chatTypes';
+import type { GeminiTurn } from './contextEngine';
+
+export interface ChatAPIResponse {
+  text: string;
+  codeChanges: CodeChange[];
+}
+
+/**
+ * เรียก Gemini สำหรับ Chat แบบ multi-turn
+ * ส่ง system instruction แยกจาก chat history
+ */
+export async function callGeminiChat(params: {
+  apiKey: string;
+  systemInstruction: string;
+  /** history ย้อนหลัง (ไม่รวม message ล่าสุด) */
+  history: GeminiTurn[];
+  /** user message ล่าสุด พร้อม context ไฟล์แนบ */
+  userMessage: string;
+  onRetry?: (attempt: number, waitSec: number) => void;
+}): Promise<ChatAPIResponse> {
+  const { apiKey, systemInstruction, history, userMessage, onRetry } = params;
+
+  const onStatus = (msg: string, ms: number) => {
+    if (msg && onRetry) {
+      const match = msg.match(/\((\d+)\/\d+\)/);
+      const attempt = match ? parseInt(match[1]) : 1;
+      onRetry(attempt, Math.ceil(ms / 1000));
+    }
+  };
+  aiRateLimiter.setStatusCallback(onStatus);
+
+  const responseText = await aiRateLimiter.enqueue(async () => {
+    const body = {
+      system_instruction: {
+        parts: [{ text: systemInstruction }],
+      },
+      contents: [
+        ...history,
+        { role: 'user', parts: [{ text: userMessage }] },
+      ],
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: 8192,
+        topP: 0.85,
+      },
+    };
+
+    const res = await fetch(`${GEMINI_BASE}?key=${apiKey}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (res.status === 429) throw new Error('429: Too Many Requests');
+
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({})) as {
+        error?: { message?: string };
+      };
+      const errMsg = errBody?.error?.message ?? '';
+      if (res.status === 403 || (res.status === 400 && errMsg.toLowerCase().includes('api key'))) {
+        throw new Error(`API_KEY_INVALID: ${errMsg || 'Invalid API Key'}`);
+      }
+      throw new Error(`Gemini ${res.status}: ${errMsg || 'Unknown API Error'}`);
+    }
+
+    const data = await res.json() as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      error?: { message?: string };
+    };
+
+    if (data.error) throw new Error(`Gemini: ${data.error.message}`);
+
+    const text: string = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+    if (!text) throw new Error('EMPTY_RESPONSE');
+    return text;
+  });
+
+  return parseChatResponse(responseText);
+}
+
+/**
+ * Parse <<<FILE:filename>>> ... <<<END>>> blocks จาก response ของ AI
+ */
+export function parseChatResponse(rawText: string): ChatAPIResponse {
+  const codeChanges: CodeChange[] = [];
+  const fileBlockRegex = /<<<FILE:([^>]+)>>>([\s\S]*?)<<<END>>>/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = fileBlockRegex.exec(rawText)) !== null) {
+    const filename = match[1].trim();
+    const content = match[2].trim();
+    codeChanges.push({ filename, newContent: content, applied: false });
+  }
+
+  // ลบ code blocks ออกจาก text เพื่อแสดงแค่ explanation
+  let cleanText = rawText;
+  if (codeChanges.length > 0) {
+    cleanText = rawText.replace(fileBlockRegex, '').trim();
+    cleanText = cleanText.replace(/\n{3,}/g, '\n\n');
+  }
+
+  return { text: cleanText || rawText, codeChanges };
+}

@@ -25,7 +25,7 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
   const navigate = useNavigate();
   const {
     user, currentProject, saveStatus, syncStatus, theme,
-    aiPanelOpen, setAIPanelOpen, logout, vfs, accessToken
+    chatPanelOpen, setChatPanelOpen, logout, vfs, accessToken
   } = useAppStore();
   const [showSettings, setShowSettings] = useState(false);
   const [showProjectMenu, setShowProjectMenu] = useState(false);
@@ -237,9 +237,9 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
         {/* AI toggle */}
         <button
           id="btn-ai"
-          onClick={() => setAIPanelOpen(!aiPanelOpen)}
+          onClick={() => setChatPanelOpen(!chatPanelOpen)}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-xs ${
-            aiPanelOpen
+            chatPanelOpen
               ? 'bg-primary-600 text-white shadow-glow-sm'
               : 'hover:bg-surface-800 text-zinc-400 hover:text-white'
           }`}

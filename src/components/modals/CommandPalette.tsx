@@ -22,7 +22,7 @@ interface Props {
 
 export function CommandPalette({ files, onClose, onOpenFile, onSave, onToggleAI }: Props) {
   const navigate = useNavigate();
-  const { setTheme, theme, setAIPanelOpen, setFontSize, fontSize } = useAppStore();
+  const { setTheme, theme, setFontSize, fontSize } = useAppStore();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);

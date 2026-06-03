@@ -18,7 +18,7 @@ import { FileTree } from '../sidebar/FileTree';
 import { PreviewPane } from '../output/PreviewPane';
 import { buildPreview } from '../../utils/blobHelpers';
 import { TerminalPane } from '../output/TerminalPane';
-import { AIPanel } from '../ai/AIPanel';
+import { AIChatPanel } from '../ai/AIChatPanel';
 import { CommandPalette } from '../modals/CommandPalette';
 import { SearchInFilesModal } from '../modals/SearchInFilesModal';
 import { OnboardingTour } from '../shared/OnboardingTour';
@@ -53,6 +53,7 @@ export default function IDEPage() {
     activeLanguage, setActiveLanguage,
     previewMode, setPreviewMode,
     aiPanelOpen, setAIPanelOpen,
+    chatPanelOpen, setChatPanelOpen,
     commandPaletteOpen, setCommandPaletteOpen,
     showMultiTabBanner, setShowMultiTabBanner,
     addConsoleEntry, clearConsole,
@@ -257,12 +258,6 @@ export default function IDEPage() {
     setVFS(newVFS);
   }
 
-  // AI fix apply
-  function handleApplyFix(fixes: Record<string, string>) {
-    for (const [filename, content] of Object.entries(fixes)) {
-      handleFileChange(filename, content);
-    }
-  }
 
   // Insert snippet at current cursor (simplified: append to active file)
   function handleInsertSnippet(code: string) {
@@ -346,8 +341,14 @@ export default function IDEPage() {
 
       {/* Main layout */}
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar — desktop */}
-        <div id="ide-sidebar" className="hidden md:flex flex-col shrink-0 overflow-hidden" style={{ width: sidebarWidth }}>
+        {/* Sidebar — desktop & mobile */}
+        <div
+          id="ide-sidebar"
+          className={`hidden md:flex flex-col shrink-0 overflow-hidden ${
+            mobileTab === 'files' ? '!flex w-full' : ''
+          }`}
+          style={{ width: sidebarWidth }}
+        >
           <ErrorBoundary>
             <FileTree
               projectId={projectId!}
@@ -373,7 +374,11 @@ export default function IDEPage() {
         />
 
         {/* Editor + Output */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div
+          className={`flex-1 flex flex-col overflow-hidden ${
+            ['files', 'ai', 'preview'].includes(mobileTab) ? 'hidden md:flex' : 'flex'
+          }`}
+        >
           {/* Tab bar */}
           <ErrorBoundary>
             <TabBar
@@ -389,7 +394,13 @@ export default function IDEPage() {
           {/* Editor + Preview row */}
           <div className="flex-1 flex overflow-hidden">
             {/* Editor */}
-            <div id="ide-editor" className="flex-1 relative overflow-hidden" ref={editorContainerRef}>
+            <div
+              id="ide-editor"
+              className={`flex-1 relative overflow-hidden ${
+                mobileTab === 'editor' ? 'block' : 'hidden md:block'
+              }`}
+              ref={editorContainerRef}
+            >
               {openTabs.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-zinc-600">
                   <Code2 className="w-12 h-12 mb-4" />
@@ -410,7 +421,7 @@ export default function IDEPage() {
                           onCursorChange={(line, col) => { setCursorLine(line); setCursorCol(col); }}
                           onSave={handleManualSave}
                           onRun={() => {}}
-                          onToggleAI={() => setAIPanelOpen(!aiPanelOpen)}
+                          onToggleAI={() => setChatPanelOpen(!chatPanelOpen)}
                           markers={tab === activeTab ? compileErrors : []}
                         />
                       )}
@@ -420,8 +431,14 @@ export default function IDEPage() {
               )}
             </div>
 
-            {/* Output panel — desktop */}
-            <div id="ide-output-panel" className="hidden md:flex flex-col shrink-0" style={{ width: outputPanelWidth }}>
+            {/* Output panel — desktop & mobile */}
+            <div
+              id="ide-output-panel"
+              className={`hidden md:flex flex-col shrink-0 ${
+                mobileTab === 'preview' ? '!flex w-full' : ''
+              }`}
+              style={{ width: outputPanelWidth }}
+            >
               <ErrorBoundary>
                 {previewMode === 'web' ? (
                   <PreviewPane
@@ -440,10 +457,16 @@ export default function IDEPage() {
               </ErrorBoundary>
             </div>
           </div>
+        </div>
 
-          {/* AI Panel */}
+        {/* AI Chat Panel — desktop & mobile */}
+        <div
+          className={`hidden md:flex shrink-0 ${
+            chatPanelOpen ? 'md:flex' : 'md:hidden'
+          } ${mobileTab === 'ai' ? '!flex w-full' : ''}`}
+        >
           <ErrorBoundary>
-            <AIPanel onApplyFix={handleApplyFix} />
+            <AIChatPanel onApplyChange={handleFileChange} />
           </ErrorBoundary>
         </div>
       </div>

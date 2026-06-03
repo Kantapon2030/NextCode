@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { VFSState } from '../types';
+import type { ChatMessage, ProjectSnapshot } from '../types/chatTypes';
 import { setFileAtPath, setFolderAtPath, deleteAtPath, moveNode, buildFlatIndex, buildCompatibilityMaps } from '../storage/vfsHelpers';
 import type { SupabaseUser } from '../services/supabase';
 
@@ -76,6 +77,12 @@ interface AppState {
   minimapEnabled: boolean;
   showMultiTabBanner: boolean;
 
+  // ─── AI Chat state (ใหม่) ───────────────────────────────────────────────
+  chatMessages: ChatMessage[];
+  chatLoading: boolean;
+  chatPanelOpen: boolean;
+  projectSnapshot: ProjectSnapshot | null;
+
   setUser: (user: User | null) => void;
   setSupabaseUser: (user: SupabaseUser | null) => void;
   setAccessToken: (token: string | null, expiry: number | null) => void;
@@ -118,6 +125,14 @@ interface AppState {
   /** ล้าง workspace state ทั้งหมดเมื่อเปลี่ยนโปรเจกต์ */
   resetWorkspace: () => void;
   logout: () => void;
+
+  // ─── AI Chat actions (ใหม่) ────────────────────────────────────────────
+  addChatMessage: (msg: ChatMessage) => void;
+  updateChatMessage: (id: string, updates: Partial<ChatMessage>) => void;
+  clearChat: () => void;
+  setChatLoading: (loading: boolean) => void;
+  setChatPanelOpen: (open: boolean) => void;
+  setProjectSnapshot: (snap: ProjectSnapshot | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -149,6 +164,11 @@ export const useAppStore = create<AppState>((set) => ({
   fontFamily: 'JetBrains Mono',
   minimapEnabled: true,
   showMultiTabBanner: false,
+  // AI Chat initial state
+  chatMessages: [],
+  chatLoading: false,
+  chatPanelOpen: false,
+  projectSnapshot: null,
 
   setUser: (user) => set({ user }),
   setSupabaseUser: (supabaseUser) => set({ supabaseUser }),
@@ -273,6 +293,20 @@ export const useAppStore = create<AppState>((set) => ({
   setFontFamily: (fontFamily) => set({ fontFamily }),
   setMinimapEnabled: (minimapEnabled) => set({ minimapEnabled }),
   setShowMultiTabBanner: (showMultiTabBanner) => set({ showMultiTabBanner }),
+  // AI Chat actions
+  addChatMessage: (msg) =>
+    set((s) => ({ chatMessages: [...s.chatMessages, msg] })),
+  updateChatMessage: (id, updates) =>
+    set((s) => ({
+      chatMessages: s.chatMessages.map((m) =>
+        m.id === id ? { ...m, ...updates } : m
+      ),
+    })),
+  clearChat: () => set({ chatMessages: [], projectSnapshot: null }),
+  setChatLoading: (chatLoading) => set({ chatLoading }),
+  setChatPanelOpen: (chatPanelOpen) => set({ chatPanelOpen }),
+  setProjectSnapshot: (projectSnapshot) => set({ projectSnapshot }),
+
   resetProjectState: () =>
     set({
       openTabs: [],
@@ -280,6 +314,8 @@ export const useAppStore = create<AppState>((set) => ({
       terminalOutput: [],
       vfs: { tree: {}, flatIndex: {}, files: {}, assets: {} },
       currentProject: null,
+      chatMessages: [],
+      projectSnapshot: null,
     }),
   resetWorkspace: () =>
     set({
@@ -291,6 +327,8 @@ export const useAppStore = create<AppState>((set) => ({
       consoleLogs: [],
       consoleErrors: [],
       aiResponse: null,
+      chatMessages: [],
+      projectSnapshot: null,
       saveStatus: 'saved',
       syncStatus: 'local',
       previewMode: 'web',

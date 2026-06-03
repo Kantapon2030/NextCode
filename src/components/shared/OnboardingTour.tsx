@@ -9,18 +9,18 @@ interface TourStep {
 }
 
 export function OnboardingTour() {
-  const { userMode, theme, aiPanelOpen, setAIPanelOpen } = useAppStore();
+  const { userMode, theme, chatPanelOpen, setChatPanelOpen } = useAppStore();
   const [currentStep, setCurrentStep] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [isVisible, setIsVisible] = useState(false);
-  const [originalAIPanelOpen, setOriginalAIPanelOpen] = useState(false);
+  const [originalChatPanelOpen, setOriginalChatPanelOpen] = useState(false);
 
   // Check if tour should run
   useEffect(() => {
     const isDone = localStorage.getItem('tour_done') === 'true';
     if (userMode === 'beginner' && !isDone) {
       setIsVisible(true);
-      setOriginalAIPanelOpen(aiPanelOpen);
+      setOriginalChatPanelOpen(chatPanelOpen);
     } else {
       setIsVisible(false);
     }
@@ -48,7 +48,7 @@ export function OnboardingTour() {
     },
     {
       title: 'ผู้ช่วยเขียนโค้ด AI ส่วนตัว (AI Assistant) 🤖',
-      content: 'แถบด้านล่างนี้คือ AI Panel ที่สามารถช่วยคุณหาบั๊ก วิเคราะห์คำสั่ง อธิบายจุดบกพร่อง หรือช่วยเจนโค้ดใหม่ด้วย Gemini 2.5 Flash Lite ล่าสุด',
+      content: 'แถบด้านขวานี้คือ AI Chat Assistant ที่สามารถพูดคุยโต้ตอบ ช่วยหาบั๊ก วิเคราะห์คำสั่ง อธิบายโค้ด หรือแก้ไขไฟล์โดยปรับใช้โค้ดใหม่ได้ทันที',
       targetId: 'ide-ai-panel',
     },
     {
@@ -65,10 +65,10 @@ export function OnboardingTour() {
 
     if (activeStep.targetId === 'ide-ai-panel') {
       // Force open AI panel
-      setAIPanelOpen(true);
+      setChatPanelOpen(true);
     } else if (currentStep < 4) {
       // Restore previous state if we went back
-      setAIPanelOpen(originalAIPanelOpen);
+      setChatPanelOpen(originalChatPanelOpen);
     }
   }, [currentStep, isVisible, activeStep.targetId]);
 
@@ -118,7 +118,7 @@ export function OnboardingTour() {
     localStorage.setItem('tour_done', 'true');
     setIsVisible(false);
     // Restore original AI panel state
-    setAIPanelOpen(originalAIPanelOpen);
+    setChatPanelOpen(originalChatPanelOpen);
   };
 
   const handleSkip = () => {
