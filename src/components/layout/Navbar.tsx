@@ -6,7 +6,7 @@ import { clearUserSession } from '../../storage/syncManager';
 import { toast } from '../shared/Toast';
 import SettingsModal from '../modals/SettingsModal';
 import {
-  Code2, Save, Bot, Keyboard, Settings, User, ChevronDown,
+  Code2, Save, Keyboard, Settings, User, ChevronDown,
   LogOut, LayoutDashboard, Download, Package, Loader2, CheckCircle, Cloud, CloudOff
 } from 'lucide-react';
 import JSZip from 'jszip';
@@ -25,7 +25,7 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
   const navigate = useNavigate();
   const {
     user, currentProject, saveStatus, syncStatus, theme,
-    chatPanelOpen, setChatPanelOpen, logout, vfs, accessToken
+    logout, vfs, accessToken
   } = useAppStore();
   const [showSettings, setShowSettings] = useState(false);
   const [showProjectMenu, setShowProjectMenu] = useState(false);
@@ -231,23 +231,6 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
             </div>
           )}
         </div>
-
-
-
-        {/* AI toggle */}
-        <button
-          id="btn-ai"
-          onClick={() => setChatPanelOpen(!chatPanelOpen)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all text-xs ${
-            chatPanelOpen
-              ? 'bg-primary-600 text-white shadow-glow-sm'
-              : 'hover:bg-surface-800 text-zinc-400 hover:text-white'
-          }`}
-          title="AI Assistant (Ctrl+B)"
-        >
-          <Bot className="w-4 h-4" />
-          <span className="hidden sm:inline">AI</span>
-        </button>
 
         {/* Command palette (expert) */}
         <button

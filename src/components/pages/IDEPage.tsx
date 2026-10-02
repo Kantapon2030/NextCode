@@ -18,12 +18,11 @@ import { FileTree } from '../sidebar/FileTree';
 import { PreviewPane } from '../output/PreviewPane';
 import { buildPreview } from '../../utils/blobHelpers';
 import { TerminalPane } from '../output/TerminalPane';
-import { AIChatPanel } from '../ai/AIChatPanel';
 import { CommandPalette } from '../modals/CommandPalette';
 import { SearchInFilesModal } from '../modals/SearchInFilesModal';
 import { OnboardingTour } from '../shared/OnboardingTour';
 import ShortcutCheatsheet from '../modals/ShortcutCheatsheet';
-import { Code2, Edit3, FileText, Bot } from 'lucide-react';
+import { Code2, Edit3, FileText } from 'lucide-react';
 import { ImagePreview } from '../editor/ImagePreview';
 
 // Debounce helper
@@ -52,8 +51,6 @@ export default function IDEPage() {
     setSaveStatus,
     activeLanguage, setActiveLanguage,
     previewMode, setPreviewMode,
-    aiPanelOpen, setAIPanelOpen,
-    chatPanelOpen, setChatPanelOpen,
     commandPaletteOpen, setCommandPaletteOpen,
     showMultiTabBanner, setShowMultiTabBanner,
     addConsoleEntry, clearConsole,
@@ -113,7 +110,7 @@ export default function IDEPage() {
   }, []);
 
   // Mobile tabs
-  const [mobileTab, setMobileTab] = useState<'editor' | 'preview' | 'files' | 'ai'>('editor');
+  const [mobileTab, setMobileTab] = useState<'editor' | 'preview' | 'files'>('editor');
 
   // Load project
   useEffect(() => {
@@ -305,10 +302,6 @@ export default function IDEPage() {
     addConsoleEntry(entry);
   }
 
-  // Ask AI from error banner
-  function handleAskAI(errorMsg: string) {
-    setAIPanelOpen(true);
-  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -421,7 +414,6 @@ export default function IDEPage() {
                           onCursorChange={(line, col) => { setCursorLine(line); setCursorCol(col); }}
                           onSave={handleManualSave}
                           onRun={() => {}}
-                          onToggleAI={() => setChatPanelOpen(!chatPanelOpen)}
                           markers={tab === activeTab ? compileErrors : []}
                         />
                       )}
@@ -444,7 +436,6 @@ export default function IDEPage() {
                   <PreviewPane
                     html={previewHtml}
                     onConsoleEntry={handleConsoleEntry}
-                    onAskAI={handleAskAI}
                   />
                 ) : (
                   <TerminalPane
@@ -459,16 +450,6 @@ export default function IDEPage() {
           </div>
         </div>
 
-        {/* AI Chat Panel — desktop & mobile */}
-        <div
-          className={`hidden md:flex shrink-0 ${
-            chatPanelOpen ? 'md:flex' : 'md:hidden'
-          } ${mobileTab === 'ai' ? '!flex w-full' : ''}`}
-        >
-          <ErrorBoundary>
-            <AIChatPanel onApplyChange={handleFileChange} />
-          </ErrorBoundary>
-        </div>
       </div>
 
       {/* Status bar */}
@@ -487,7 +468,6 @@ export default function IDEPage() {
           { key: 'editor', label: 'แก้โค้ด', icon: <Edit3 className="w-4 h-4" /> },
           { key: 'preview', label: 'ผลลัพธ์', icon: <FileText className="w-4 h-4" /> },
           { key: 'files', label: 'ไฟล์', icon: <Code2 className="w-4 h-4" /> },
-          { key: 'ai', label: 'AI', icon: <Bot className="w-4 h-4" /> },
         ].map((t) => (
           <button
             key={t.key}
@@ -546,7 +526,6 @@ export default function IDEPage() {
           onClose={() => setCommandPaletteOpen(false)}
           onOpenFile={openTab}
           onSave={handleManualSave}
-          onToggleAI={() => setAIPanelOpen(!aiPanelOpen)}
         />
       )}
 

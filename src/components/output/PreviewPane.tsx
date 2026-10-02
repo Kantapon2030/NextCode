@@ -1,7 +1,7 @@
 import React, { useRef, useCallback, useEffect, useState } from 'react';
 import { useAppStore, ConsoleEntry } from '../../store/appStore';
 import { 
-  RefreshCw, Smartphone, Monitor, Maximize2, AlertTriangle, X, Bot,
+  RefreshCw, Smartphone, Monitor, Maximize2, AlertTriangle, X,
   ChevronLeft, ChevronRight, Home, Globe 
 } from 'lucide-react';
 import { buildPreview, resolvePath } from '../../utils/blobHelpers';
@@ -9,7 +9,6 @@ import { buildPreview, resolvePath } from '../../utils/blobHelpers';
 interface Props {
   html?: string;
   onConsoleEntry: (entry: ConsoleEntry) => void;
-  onAskAI: (error: string) => void;
 }
 
 interface PreviewError {
@@ -17,7 +16,7 @@ interface PreviewError {
   line?: number;
 }
 
-export function PreviewPane({ onConsoleEntry, onAskAI }: Props) {
+export function PreviewPane({ onConsoleEntry }: Props) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const { previewWidth, setPreviewWidth, theme, vfs, currentProject } = useAppStore();
   const [currentFile, setCurrentFile] = useState('index.html');
@@ -227,12 +226,6 @@ export function PreviewPane({ onConsoleEntry, onAskAI }: Props) {
             ⚠ JS Error: {err.msg}
             {err.line ? ` (บรรทัด ${err.line})` : ''}
           </span>
-          <button
-            onClick={() => onAskAI(err.msg)}
-            className="flex items-center gap-1 px-2 py-0.5 bg-red-700 hover:bg-red-600 rounded text-xs transition-colors"
-          >
-            <Bot className="w-3 h-3" /> ถาม AI
-          </button>
           <button onClick={() => setErrors((e) => e.filter((_, j) => j !== i))}>
             <X className="w-3.5 h-3.5" />
           </button>

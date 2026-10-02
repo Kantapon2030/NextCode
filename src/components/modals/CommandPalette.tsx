@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { useNavigate } from 'react-router-dom';
 import Fuse from 'fuse.js';
-import { Search, X, Save, Bot, FileText, Plus, Download, Keyboard, Sun, Moon } from 'lucide-react';
+import { Search, X, Save, FileText, Plus, Download, Keyboard, Sun, Moon } from 'lucide-react';
 
 interface Command {
   id: string;
@@ -17,10 +17,9 @@ interface Props {
   onClose: () => void;
   onOpenFile: (filename: string) => void;
   onSave: () => void;
-  onToggleAI: () => void;
 }
 
-export function CommandPalette({ files, onClose, onOpenFile, onSave, onToggleAI }: Props) {
+export function CommandPalette({ files, onClose, onOpenFile, onSave }: Props) {
   const navigate = useNavigate();
   const { setTheme, theme, setFontSize, fontSize } = useAppStore();
   const [query, setQuery] = useState('');
@@ -29,7 +28,6 @@ export function CommandPalette({ files, onClose, onOpenFile, onSave, onToggleAI 
 
   const baseCommands: Command[] = [
     { id: 'save', label: 'บันทึก', description: 'Ctrl+S', icon: <Save className="w-4 h-4" />, action: () => { onSave(); onClose(); } },
-    { id: 'ai', label: 'เปิด AI', description: 'Ctrl+B', icon: <Bot className="w-4 h-4" />, action: () => { onToggleAI(); onClose(); } },
     { id: 'theme-dark', label: 'theme มืด', icon: <Moon className="w-4 h-4" />, action: () => { setTheme('dark'); onClose(); } },
     { id: 'theme-light', label: 'theme สว่าง', icon: <Sun className="w-4 h-4" />, action: () => { setTheme('light'); onClose(); } },
     { id: 'font-up', label: 'ขนาดตัวอักษรใหญ่ขึ้น', icon: <Keyboard className="w-4 h-4" />, action: () => { setFontSize(Math.min(fontSize + 1, 20)); onClose(); } },

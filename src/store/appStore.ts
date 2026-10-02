@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import type { VFSState } from '../types';
-import type { ChatMessage, ProjectSnapshot } from '../types/chatTypes';
 import { setFileAtPath, setFolderAtPath, deleteAtPath, moveNode, buildFlatIndex, buildCompatibilityMaps } from '../storage/vfsHelpers';
 import type { SupabaseUser } from '../services/supabase';
 
@@ -37,15 +36,8 @@ export interface Project {
 
 export type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'offline';
 export type SyncStatus = 'synced' | 'syncing' | 'local' | 'error';
-export type AIMode = 'fix' | 'generate' | 'explain';
 export type PreviewWidth = '375' | '768' | '100%';
 export type UserMode = 'beginner' | 'expert';
-
-export interface AIResponse {
-  explanation: string;
-  fixes: Record<string, string>;
-  rawText: string;
-}
 
 interface AppState {
   user: User | null;
@@ -62,10 +54,6 @@ interface AppState {
   syncStatus: SyncStatus;
   activeLanguage: string;
   previewMode: 'web' | 'terminal';
-  aiPanelOpen: boolean;
-  aiMode: AIMode;
-  aiLoading: boolean;
-  aiResponse: AIResponse | null;
   consoleErrors: ConsoleEntry[];
   consoleLogs: ConsoleEntry[];
   terminalOutput: TerminalEntry[];
@@ -76,12 +64,6 @@ interface AppState {
   fontFamily: string;
   minimapEnabled: boolean;
   showMultiTabBanner: boolean;
-
-  // ─── AI Chat state (ใหม่) ───────────────────────────────────────────────
-  chatMessages: ChatMessage[];
-  chatLoading: boolean;
-  chatPanelOpen: boolean;
-  projectSnapshot: ProjectSnapshot | null;
 
   setUser: (user: User | null) => void;
   setSupabaseUser: (user: SupabaseUser | null) => void;
@@ -105,10 +87,6 @@ interface AppState {
   setSyncStatus: (status: SyncStatus) => void;
   setActiveLanguage: (lang: string) => void;
   setPreviewMode: (mode: 'web' | 'terminal') => void;
-  setAIPanelOpen: (open: boolean) => void;
-  setAIMode: (mode: AIMode) => void;
-  setAILoading: (loading: boolean) => void;
-  setAIResponse: (response: AIResponse | null) => void;
   addConsoleEntry: (entry: ConsoleEntry) => void;
   clearConsole: () => void;
   addTerminalEntry: (entry: TerminalEntry) => void;
@@ -125,14 +103,6 @@ interface AppState {
   /** ล้าง workspace state ทั้งหมดเมื่อเปลี่ยนโปรเจกต์ */
   resetWorkspace: () => void;
   logout: () => void;
-
-  // ─── AI Chat actions (ใหม่) ────────────────────────────────────────────
-  addChatMessage: (msg: ChatMessage) => void;
-  updateChatMessage: (id: string, updates: Partial<ChatMessage>) => void;
-  clearChat: () => void;
-  setChatLoading: (loading: boolean) => void;
-  setChatPanelOpen: (open: boolean) => void;
-  setProjectSnapshot: (snap: ProjectSnapshot | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -150,10 +120,6 @@ export const useAppStore = create<AppState>((set) => ({
   syncStatus: 'local',
   activeLanguage: 'html',
   previewMode: 'web',
-  aiPanelOpen: false,
-  aiMode: 'fix',
-  aiLoading: false,
-  aiResponse: null,
   consoleErrors: [],
   consoleLogs: [],
   terminalOutput: [],
@@ -164,27 +130,19 @@ export const useAppStore = create<AppState>((set) => ({
   fontFamily: 'JetBrains Mono',
   minimapEnabled: true,
   showMultiTabBanner: false,
-  // AI Chat initial state
-  chatMessages: [],
-  chatLoading: false,
-  chatPanelOpen: false,
-  projectSnapshot: null,
 
   setUser: (user) => set({ user }),
   setSupabaseUser: (supabaseUser) => set({ supabaseUser }),
   setAccessToken: (accessToken, tokenExpiry) => set({ accessToken, tokenExpiry }),
   setUserMode: (userMode) => set({ userMode }),
   setProjects: (projects) => set({ projects }),
-  addProject: (project) => set((s) => ({ projects: [project, ...s.projects] })),
-  removeProject: (id) => set((s) => ({
-    projects: s.projects.filter((p) => p.id !== id),
-    currentProject: s.currentProject?.id === id ? null : s.currentProject,
-  })),
+  addProject: (project) =>
+    set((s) => ({ projects: [project, ...s.projects] })),
+  removeProject: (id) =>
+    set((s) => ({ projects: s.projects.filter((p) => p.id !== id) })),
   updateProject: (id, updates) =>
     set((s) => ({
       projects: s.projects.map((p) => (p.id === id ? { ...p, ...updates } : p)),
-      currentProject:
-        s.currentProject?.id === id ? { ...s.currentProject, ...updates } : s.currentProject,
     })),
   setCurrentProject: (currentProject) => set({ currentProject }),
   setVFS: (vfs) => set({ vfs }),
@@ -269,10 +227,6 @@ export const useAppStore = create<AppState>((set) => ({
   setSyncStatus: (syncStatus) => set({ syncStatus }),
   setActiveLanguage: (activeLanguage) => set({ activeLanguage }),
   setPreviewMode: (previewMode) => set({ previewMode }),
-  setAIPanelOpen: (aiPanelOpen) => set({ aiPanelOpen }),
-  setAIMode: (aiMode) => set({ aiMode }),
-  setAILoading: (aiLoading) => set({ aiLoading }),
-  setAIResponse: (aiResponse) => set({ aiResponse }),
   addConsoleEntry: (entry) =>
     set((s) => ({
       consoleLogs: [...s.consoleLogs.slice(-200), entry],
@@ -293,19 +247,6 @@ export const useAppStore = create<AppState>((set) => ({
   setFontFamily: (fontFamily) => set({ fontFamily }),
   setMinimapEnabled: (minimapEnabled) => set({ minimapEnabled }),
   setShowMultiTabBanner: (showMultiTabBanner) => set({ showMultiTabBanner }),
-  // AI Chat actions
-  addChatMessage: (msg) =>
-    set((s) => ({ chatMessages: [...s.chatMessages, msg] })),
-  updateChatMessage: (id, updates) =>
-    set((s) => ({
-      chatMessages: s.chatMessages.map((m) =>
-        m.id === id ? { ...m, ...updates } : m
-      ),
-    })),
-  clearChat: () => set({ chatMessages: [], projectSnapshot: null }),
-  setChatLoading: (chatLoading) => set({ chatLoading }),
-  setChatPanelOpen: (chatPanelOpen) => set({ chatPanelOpen }),
-  setProjectSnapshot: (projectSnapshot) => set({ projectSnapshot }),
 
   resetProjectState: () =>
     set({
@@ -314,24 +255,19 @@ export const useAppStore = create<AppState>((set) => ({
       terminalOutput: [],
       vfs: { tree: {}, flatIndex: {}, files: {}, assets: {} },
       currentProject: null,
-      chatMessages: [],
-      projectSnapshot: null,
     }),
   resetWorkspace: () =>
     set({
       openTabs: [],
       activeTab: null,
-      activeLanguage: 'html',
-      vfs: { tree: {}, flatIndex: {}, files: {}, assets: {} },
       terminalOutput: [],
       consoleLogs: [],
       consoleErrors: [],
-      aiResponse: null,
-      chatMessages: [],
-      projectSnapshot: null,
-      saveStatus: 'saved',
-      syncStatus: 'local',
+      vfs: { tree: {}, flatIndex: {}, files: {}, assets: {} },
+      currentProject: null,
+      activeLanguage: 'html',
       previewMode: 'web',
+      saveStatus: 'saved',
     }),
   logout: () =>
     set({
@@ -339,13 +275,11 @@ export const useAppStore = create<AppState>((set) => ({
       supabaseUser: null,
       accessToken: null,
       tokenExpiry: null,
+      projects: [],
       currentProject: null,
+      vfs: { tree: {}, flatIndex: {}, files: {}, assets: {} },
       openTabs: [],
       activeTab: null,
-      vfs: { tree: {}, flatIndex: {}, files: {}, assets: {} },
-      aiResponse: null,
-      consoleLogs: [],
-      consoleErrors: [],
-      terminalOutput: [],
+      syncStatus: 'local',
     }),
 }));

@@ -10,9 +10,6 @@ import {
   insertSnippetAtCursor,
 } from '../../utils/snippetShortcuts';
 import { VOID_TAGS } from '../../utils/emmetHelper';
-import { registerInlineComplete } from '../../services/inlineComplete';
-import { getSetting } from '../../storage/db';
-import { useState } from 'react';
 
 const MonacoEditor = lazy(() =>
   import('@monaco-editor/react').then((m) => ({ default: m.default }))
@@ -26,7 +23,6 @@ interface Props {
   onCursorChange: (line: number, col: number) => void;
   onSave: () => void;
   onRun: () => void;
-  onToggleAI: () => void;
   markers?: { line: number; col: number; message: string; severity: 'error' | 'warning' }[];
 }
 
@@ -38,19 +34,9 @@ export function MonacoWrapper({
   onCursorChange,
   onSave,
   onRun,
-  onToggleAI,
   markers = [],
 }: Props) {
   const { theme, fontSize, userMode, user, fontFamily, minimapEnabled } = useAppStore();
-  const [inlineCompleteEnabled, setInlineCompleteEnabled] = useState(true);
-
-  useEffect(() => {
-    async function loadSettings() {
-      const val = await getSetting<boolean>('inline_complete', true);
-      setInlineCompleteEnabled(val);
-    }
-    loadSettings();
-  }, []);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const editorRef  = useRef<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -117,13 +103,11 @@ export function MonacoWrapper({
     // ── Use refs to avoid stale closures in Monaco commands ──
     const onSaveRef = useRef(onSave);
     const onRunRef = useRef(onRun);
-    const onToggleAIRef = useRef(onToggleAI);
   
     useEffect(() => {
       onSaveRef.current = onSave;
       onRunRef.current = onRun;
-      onToggleAIRef.current = onToggleAI;
-    }, [onSave, onRun, onToggleAI]);
+    }, [onSave, onRun]);
   
     // ── onMount ──────────────────────────────────────────────────
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -134,7 +118,6 @@ export function MonacoWrapper({
       // Keyboard shortcuts
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => onSaveRef.current());
       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => onRunRef.current());
-      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyB, () => onToggleAIRef.current());
 
       // ── Wrap Selection with Tag (Alt + W) ──
       editor.addCommand(monaco.KeyMod.Alt | monaco.KeyCode.KeyW, () => {
@@ -270,12 +253,6 @@ export function MonacoWrapper({
 
     hoverProviderRef.current = hoverDisposable;
 
-    // ── AI Inline Complete (Ghost Text) ──────────────────────
-    if (inlineCompleteEnabled) {
-      registerInlineComplete(editor, monaco, user?.id || 'guest', (msg: string, ms: number) => {
-        console.log(`[InlineComplete Status] ${msg} (${ms}ms)`);
-      });
-    }
 
     // ── Custom Format Action (Ctrl+Shift+F) ──────────────────
     editor.addAction({

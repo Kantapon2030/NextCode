@@ -1,29 +1,34 @@
 # Nextcode IDE 🚀
 
-**Nextcode IDE** คือแพลตฟอร์มเขียนโค้ดและรันโค้ดแบบครบครัน (All-in-One Web IDE) ที่ทำงานบนเว็บเบราว์เซอร์ได้ทันทีโดยไม่ต้องติดตั้งซอฟต์แวร์เพิ่มเติม มาพร้อมผู้ช่วยอัจฉริยะ AI ในการแนะแนวทาง แก้ไขจุดบกพร่อง และอธิบายการทำงานของโค้ดเป็นภาษาไทยอย่างเต็มรูปแบบ
+**Nextcode IDE** คือแพลตฟอร์มเขียนโค้ดและรันโค้ดแบบครบครัน (All-in-One Pure Web IDE) ที่ออกแบบมาเพื่อการเขียนโค้ดเพียวๆ บนเว็บเบราว์เซอร์ Chrome ได้ทันที ทำงานได้เต็มประสิทธิภาพ รวดเร็ว น้ำหนักเบา และปลอดภัย ไม่ต้องพึ่งพาเซิร์ฟเวอร์ภายนอกหรือระบบ AI
 
 ---
 
 ## ✨ ฟีเจอร์หลัก (Key Features)
 
+- ⚡ **Pure In-Browser Code Editing:**
+  - เน้นการเขียนโค้ดเพียวๆ ลื่นไหล รวดเร็ว ไม่มี AI หน่วงเครื่องหรือใช้ quota API
+  - เริ่มต้นใช้งานได้ทันทีด้วยปุ่ม "เริ่มเขียนโค้ดทันที (Guest Mode)" โดยไม่ต้องล็อกอิน
 - 📁 **In-Browser Runtimes & Multi-Language Support:**
-  - รองรับการเขียนและแสดงผลภาษา **HTML / CSS / JavaScript** แบบเรียลไทม์ (Live Preview)
-  - รันภาษา **Python, C, และ C++** ได้โดยตรงจากในเบราว์เซอร์
-- 🤖 **AI-Powered Developer Assistant (Gemini 2.5 Flash Lite):**
-  - **AI Inline Autocomplete:** แนะนำโค้ดขณะพิมพ์แบบ Ghost Text (กด `Tab` เพื่อยอมรับข้อเสนอแนะ)
-  - **AI Panel:** ผู้ช่วยอัจฉริยะด้านล่างหน้าจอช่วยวิเคราะห์หาบั๊ก เจนโค้ด และเขียนคำอธิบายเป็นภาษาไทย
-- ⚙️ **Premium Developer Experience (Monaco Editor):**
-  - ใช้ขุมพลังเดียวกับ VS Code รองรับการจัดฟอร์แมตอัตโนมัติ (Format on Save / Format Code), การเปลี่ยนขนาดและรูปแบบฟอนต์ (เช่น JetBrains Mono, Fira Code)
+  - รองรับการเขียนและแสดงผลภาษา **HTML / CSS / JavaScript** แบบเรียลไทม์ (Live Preview พร้อม iframe sandbox)
+  - รันภาษา **Python** ได้โดยตรงในเบราว์เซอร์ผ่าน Pyodide และ SharedArrayBuffer
+  - รันภาษา **C และ C++** ผ่าน online compiler runtime พร้อมระบบจัดการข้อผิดพลาดและจัดบรรทัด
+- ⚙️ **Monaco Editor (ขุมพลังเดียวกับ VS Code):**
+  - รองรับ IntelliSense, Syntax Highlighting ครบทุกภาษา
+  - Built-in Snippets & Emmet expansion (พิมพ์ชอร์ตคัทแล้วกด `Tab` เพื่อเติมโค้ด)
+  - ฟอร์แมตโค้ดอัตโนมัติ (`Ctrl+Shift+F`), สลับ Minimap, ปรับขนาดฟอนต์ และเปลี่ยนธีม
 - 💾 **Local-First & Offline Support:**
-  - จัดเก็บโปรเจกต์และไฟล์ต่างๆ บนพื้นที่เก็บข้อมูลของเบราว์เซอร์คุณโดยตรงผ่าน **IndexedDB (Dexie.js)** ทำงานได้ลื่นไหลแม้ไม่มีอินเทอร์เน็ต
-- ☁️ **Cloud Sync & Integrations:**
-  - ซิงก์โปรเจกต์ขึ้น Cloud อัตโนมัติผ่านการเชื่อมต่อ **Google Drive**
-  - เชื่อมต่อและสำรองข้อมูลโค้ดอย่างปลอดภัยผ่าน **GitHub Gists**
-- 🎨 **Responsive & Rich Aesthetics UI:**
-  - หน้าจอปรับขนาดตามอุปกรณ์ รองรับ Dark Mode, Light Mode และ High Contrast Mode สำหรับการถนอมสายตา
-  - ออกแบบด้วยความหรูหราทันสมัยตามสไตล์ Glassmorphism และ Micro-animations ที่ตอบสนองได้นุ่มนวล
+  - จัดเก็บโปรเจกต์และไฟล์ต่างๆ บนพื้นที่เก็บข้อมูลของเบราว์เซอร์คุณโดยตรงผ่าน **IndexedDB (Dexie.js)**
+  - ปลอดภัย ข้อมูลไม่รั่วไหล ทำงานได้แม้ไม่มีสัญญาณอินเทอร์เน็ต
+- ☁️ **Cloud Sync & Integrations (อุปกรณ์เสริม):**
+  - ซิงก์โปรเจกต์ขึ้น Cloud ผ่านการเชื่อมต่อ **Google Drive**
+  - เชื่อมต่อและสำรองข้อมูลโค้ดผ่าน **GitHub Gists**
+  - ส่งออกโปรเจกต์เป็นไฟล์ ZIP ได้ในคลิกเดียว
+- 🎨 **Responsive & Rich Modern UI:**
+  - รองรับ Dark Mode, Light Mode และ High Contrast Mode
+  - ออกแบบด้วย Glassmorphism ทันสมัย ใช้งานได้ดีทั้งบนหน้าจอ Desktop และ Mobile
 - 📲 **Progressive Web App (PWA):**
-  - สามารถติดตั้งเป็นแอปพลิเคชันลงบนเครื่องคอมพิวเตอร์ แท็บเล็ต หรือสมาร์ทโฟนได้โดยตรงเพื่อเปิดใช้งานอย่างรวดเร็ว
+  - สามารถติดตั้งเป็นแอปพลิเคชันลงบนเครื่องคอมพิวเตอร์ แท็บเล็ต หรือสมาร์ทโฟนได้โดยตรง
 
 ---
 
@@ -32,9 +37,25 @@
 - **Frontend Core:** React, Vite, TypeScript
 - **Styling:** Tailwind CSS, PostCSS, Lucide React (Icons)
 - **Editor:** `@monaco-editor/react` (Monaco Editor Integration)
-- **Storage & Database:** Dexie.js (IndexedDB wrapper)
-- **AI API Integration:** Google Gemini API (v1beta Models Endpoint)
-- **Other Utilities:** JSZip (สำหรับ Export ZIP), diff (สำหรับเปรียบเทียบโค้ด AI)
+- **Database / VFS:** Dexie.js (IndexedDB wrapper)
+- **Runtimes:** Pyodide (Python WebAssembly), Wandbox / Piston (C/C++)
+- **Deployment:** Cloudflare Pages ready (พร้อม `_redirects`, `_headers`, และ `wrangler.toml`)
+
+---
+
+## ☁️ การ Deploy บน Cloudflare Pages
+
+โปรเจกต์นี้ได้รับการปรับแต่งและพร้อมสำหรับการ deploy บน **Cloudflare Pages** ทันที:
+
+1. เชื่อมต่อ Git Repository บน Cloudflare Pages Dashboard
+2. กำหนดค่า Build Settings ดังนี้:
+   - **Framework preset:** `Vite` (หรือ None)
+   - **Build command:** `npm run build`
+   - **Build output directory:** `dist`
+3. ไฟล์คอนฟิกที่เตรียมไว้ให้อัตโนมัติ:
+   - `public/_redirects`: จัดการ SPA routing (`/* /index.html 200`) ไม่เกิดปัญหา 404 เมื่อรีเฟรชหน้า
+   - `public/_headers`: ตั้งค่า `Cross-Origin-Opener-Policy` และ `Cross-Origin-Embedder-Policy: credentialless` เพื่อให้ `SharedArrayBuffer` ใน Chrome สามารถทำงานกับ Python input() ได้เต็มรูปแบบ
+   - `wrangler.toml`: สำหรับ deploy ผ่าน Cloudflare Wrangler CLI (`npx wrangler pages deploy dist`)
 
 ---
 
@@ -51,31 +72,16 @@
    npm install
    ```
 
-3. **ตั้งค่าสิ่งแวดล้อม (Environment Variables):**
-   สร้างไฟล์ `.env.local` ที่โฟลเดอร์รูทของโปรเจกต์ และระบุค่าต่างๆ ดังนี้:
-   ```env
-   VITE_GOOGLE_CLIENT_ID=your_google_oauth_client_id_here
-   VITE_GEMINI_API_KEY=your_gemini_api_key_here
-   VITE_SUPABASE_URL=your_supabase_url_here
-   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key_here
-   VITE_GITHUB_CLIENT_ID=your_github_oauth_client_id_here
-   ```
-
-4. **รันบนเครื่องในโหมด Development:**
+3. **รันบนเครื่องในโหมด Development:**
    ```bash
    npm run dev
    ```
 
-5. **สร้าง Build สำหรับ Deploy:**
+4. **สร้าง Build สำหรับ Deploy:**
    ```bash
    npm run build
    ```
 
 ---
 
-## 🔒 ความปลอดภัยของข้อมูล (Data Privacy)
-* ข้อมูลโค้ดโปรเจกต์และกุญแจส่วนตัว (API Keys) ทั้งหมดถูกจัดเก็บในอุปกรณ์ของผู้ใช้อย่างปลอดภัย โดยใช้การเข้ารหัสระดับเบราว์เซอร์
-* จะไม่มีการนำข้อมูลโค้ดหรือคีย์ส่งผ่านเซิร์ฟเวอร์ภายนอก ยกเว้นการเชื่อมต่อโดยตรงไปยัง API ทางการของ Google Gemini และ Cloud Sync ที่คุณกำหนดเอง
-
----
-* พัฒนาและออกแบบโดย **Kantapon** · ขับเคลื่อนด้วยขุมพลัง **Gemini 2.5 Flash Lite**
+* พัฒนาและออกแบบโดย **Kantapon**

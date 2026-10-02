@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAppStore } from '../../store/appStore';
-import { Bot, HelpCircle, ArrowLeft, ArrowRight, X } from 'lucide-react';
+import { HelpCircle, ArrowLeft, ArrowRight, X } from 'lucide-react';
 
 interface TourStep {
   title: string;
@@ -9,18 +9,16 @@ interface TourStep {
 }
 
 export function OnboardingTour() {
-  const { userMode, theme, chatPanelOpen, setChatPanelOpen } = useAppStore();
+  const { userMode, theme } = useAppStore();
   const [currentStep, setCurrentStep] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [isVisible, setIsVisible] = useState(false);
-  const [originalChatPanelOpen, setOriginalChatPanelOpen] = useState(false);
 
   // Check if tour should run
   useEffect(() => {
     const isDone = localStorage.getItem('tour_done') === 'true';
     if (userMode === 'beginner' && !isDone) {
       setIsVisible(true);
-      setOriginalChatPanelOpen(chatPanelOpen);
     } else {
       setIsVisible(false);
     }
@@ -38,7 +36,7 @@ export function OnboardingTour() {
     },
     {
       title: 'หน้าต่างเขียนโค้ดทรงพลัง (Editor) ✍️',
-      content: 'ตรงกลางคือ Monaco Editor ที่รองรับระบบ Ghost Text แนะนำโค้ดแบบป๊อปอัปและอินไลน์ (พิมพ์แล้วกด Tab เพื่อเติมโค้ด), จัดฟอร์แมต (Ctrl+Shift+F) และปุ่มลัดครบครันเหมือน VS Code',
+      content: 'ตรงกลางคือ Monaco Editor ที่รองรับระบบเติมโค้ดอัจฉริยะ (IntelliSense), Snippets ลัด (พิมพ์แล้วกด Tab เพื่อเติมโค้ด), จัดฟอร์แมต (Ctrl+Shift+F) และปุ่มลัดครบครันเหมือน VS Code',
       targetId: 'ide-editor',
     },
     {
@@ -47,30 +45,12 @@ export function OnboardingTour() {
       targetId: 'ide-output-panel',
     },
     {
-      title: 'ผู้ช่วยเขียนโค้ด AI ส่วนตัว (AI Assistant) 🤖',
-      content: 'แถบด้านขวานี้คือ AI Chat Assistant ที่สามารถพูดคุยโต้ตอบ ช่วยหาบั๊ก วิเคราะห์คำสั่ง อธิบายโค้ด หรือแก้ไขไฟล์โดยปรับใช้โค้ดใหม่ได้ทันที',
-      targetId: 'ide-ai-panel',
-    },
-    {
       title: 'พร้อมพัฒนาซอฟต์แวร์แล้ว! 🎉',
       content: 'แนะนำการใช้งานเสร็จสิ้นแล้ว! คุณสามารถเปลี่ยนขนาดฟอนต์ ธีมสี หรือสลับเป็นโหมดเชี่ยวชาญ (Expert) ได้ที่ปุ่มตั้งค่า (⚙️) มุมขวาบนได้ทันที',
     }
   ];
 
   const activeStep = steps[currentStep];
-
-  // Automate AI Panel open/close for Step 4 (Index 4)
-  useEffect(() => {
-    if (!isVisible) return;
-
-    if (activeStep.targetId === 'ide-ai-panel') {
-      // Force open AI panel
-      setChatPanelOpen(true);
-    } else if (currentStep < 4) {
-      // Restore previous state if we went back
-      setChatPanelOpen(originalChatPanelOpen);
-    }
-  }, [currentStep, isVisible, activeStep.targetId]);
 
   // Track target element bounding rect
   useEffect(() => {
@@ -117,8 +97,6 @@ export function OnboardingTour() {
   const handleFinish = () => {
     localStorage.setItem('tour_done', 'true');
     setIsVisible(false);
-    // Restore original AI panel state
-    setChatPanelOpen(originalChatPanelOpen);
   };
 
   const handleSkip = () => {
@@ -222,7 +200,7 @@ export function OnboardingTour() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5 text-primary-400 font-semibold text-sm">
-            <Bot className="w-4 h-4" />
+            <HelpCircle className="w-4 h-4" />
             <span>Nextcode Tour</span>
           </div>
           <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-primary-950/20 text-primary-400 border border-primary-500/20">
