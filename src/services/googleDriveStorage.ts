@@ -19,6 +19,9 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutM
 }
 
 async function throwDriveError(res: Response, prefix: string): Promise<never> {
+  if (res.status === 401) {
+    throw new Error('AUTH_EXPIRED: เซสชันการเข้าสู่ระบบ Google หมดอายุแล้ว กรุณาเข้าสู่ระบบใหม่อีกครั้ง');
+  }
   let detail = `Status ${res.status}`;
   try {
     const json = await res.json();

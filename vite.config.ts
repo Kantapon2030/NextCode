@@ -6,8 +6,8 @@ export default defineConfig(({ mode }) => ({
   base: process.env.GITHUB_ACTIONS === 'true' ? '/NextCode/' : '/',
   server: {
     headers: {
-      'Cross-Origin-Opener-Policy': 'restrict-properties',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
+      'Cross-Origin-Opener-Policy': 'same-origin',
+      'Cross-Origin-Embedder-Policy': 'credentialless',
     },
   },
   optimizeDeps: {

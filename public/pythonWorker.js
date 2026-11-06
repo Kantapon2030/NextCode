@@ -1,8 +1,8 @@
 let pyodide = null;
 
-// SharedArrayBuffer layout:
-// [0] = status: 0=idle, 1=waiting_input, 2=input_ready
-// [1..256] = input string (UTF-16, max 255 chars)
+// SharedArrayBuffer layout (4096 bytes):
+// [0] = status: 0=idle, 1=waiting_input, 2=input_ready (Int32Array at offset 0, len 1)
+// [16..2063] = input string UTF-16 (Uint16Array at offset 16, max 1024 chars)
 let sharedBuffer = null;
 let statusArray  = null;   // Int32Array view
 let inputArray   = null;   // Uint16Array view สำหรับข้อความ
@@ -15,12 +15,12 @@ self.onmessage = async (e) => {
     const { hasSharedBuffer } = payload;
     if (hasSharedBuffer) {
       sharedBuffer = payload.sharedBuffer;
-      statusArray  = new Int32Array(sharedBuffer, 0, 4);
-      inputArray   = new Uint16Array(sharedBuffer, 16, 512);
+      statusArray  = new Int32Array(sharedBuffer, 0, 1);
+      inputArray   = new Uint16Array(sharedBuffer, 16, 1024);
     }
 
     // โหลด Pyodide
-    self.postMessage({ type: 'OUTPUT', text: 'กำลังโหลด Python...', outputType: 'info' });
+    self.postMessage({ type: 'OUTPUT', text: 'กำลังโหลด Python runtime...', outputType: 'info' });
 
     importScripts('https://cdn.jsdelivr.net/pyodide/v0.26.0/full/pyodide.js');
     
@@ -61,7 +61,7 @@ def _blocking_input(prompt=''):
     js._notify_waiting_input(str(prompt) if prompt else '')
 
     # Atomics.wait — บล็อก thread จนกว่า status = 2
-    # (js side จะ set 2 เมื่อผู้ใช้กด Enter)
+    # (main thread จะ set 2 และ Atomics.notify เมื่อผู้ใช้ส่งค่า)
     js._atomics_wait()
 
     # อ่านค่าจาก shared buffer
@@ -69,6 +69,12 @@ def _blocking_input(prompt=''):
 
     # reset status กลับเป็น 0
     js._reset_status()
+
+    # ตัด newline ท้าย string ที่อาจติดมาจาก terminal ถ้ามี
+    if val.endswith('\\n'):
+        val = val[:-1]
+    if val.endswith('\\r'):
+        val = val[:-1]
 
     return val
 
@@ -85,7 +91,7 @@ builtins.input = _blocking_input
       pyodide.globals.set('_atomics_wait', () => {
         // block จนกว่า status เปลี่ยนจาก 1 → 2
         while (Atomics.load(statusArray, 0) !== 2) {
-          Atomics.wait(statusArray, 0, 1, 50); // timeout 50ms
+          Atomics.wait(statusArray, 0, 1, 100);
         }
       });
 
@@ -121,12 +127,21 @@ builtins.input = _fallback_input
   else if (type === 'RUN') {
     const { code } = payload;
 
-    // โหลด packages
+    // ตรวจสอบและโหลด packages พร้อมแจ้งเตือนผู้ใช้ใน Terminal
     try {
-      await pyodide.loadPackagesFromImports(code);
+      let isPackageDownloading = false;
+      await pyodide.loadPackagesFromImports(code, {
+        messageCallback: (msg) => {
+          isPackageDownloading = true;
+          self.postMessage({ type: 'OUTPUT', text: `📦 ${msg}`, outputType: 'info' });
+        },
+      });
+      if (isPackageDownloading) {
+        self.postMessage({ type: 'OUTPUT', text: '✓ โหลดแพ็กเกจเสร็จสิ้น\n', outputType: 'info' });
+      }
     } catch {}
 
-    // รัน
+    // รันโค้ด
     try {
       await pyodide.runPythonAsync(code);
       self.postMessage({ type: 'DONE', exitCode: 0 });
@@ -148,19 +163,15 @@ builtins.input = _fallback_input
 
   else if (type === 'SEND_INPUT') {
     if (statusArray && inputArray) {
-      // ผู้ใช้กด Enter → เขียนค่าลง SharedArrayBuffer
       const { value } = payload;
-      const chars = value.split('').map(c => c.charCodeAt(0));
+      const chars = (value || '').split('').map(c => c.charCodeAt(0));
 
-      // เขียน string
       inputArray.fill(0);
       chars.forEach((c, i) => {
         if (i < inputArray.length - 1) inputArray[i] = c;
       });
 
-      // set status = 2 (input ready) → Worker จะ unblock
       Atomics.store(statusArray, 0, 2);
-      // notify Worker
       Atomics.notify(statusArray, 0);
     }
   }

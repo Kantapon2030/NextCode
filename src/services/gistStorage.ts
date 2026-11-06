@@ -1,12 +1,9 @@
 import type { Project } from '../store/appStore';
 import { db } from '../storage/db';
 
-const GIST_FILENAME = 'nextcode-data.json';
-const GIST_DESC     = 'Nextcode IDE — Project Storage';
-
 export interface GistData {
-  version:  number;
-  projects: SerializedProject[];
+  version:   number;
+  projects:  SerializedProject[];
   updatedAt: number;
 }
 
@@ -18,120 +15,10 @@ export interface SerializedProject {
   createdAt: number;
   updatedAt: number;
   files:     Record<string, {
-    content:  string;
+    content:   string;
     mime_type: string;
     encoding?: 'base64';
   }>;
-}
-
-// หา Gist ของ Nextcode หรือสร้างใหม่
-export async function getOrCreateGist(
-  token: string
-): Promise<string> {
-
-  // ตรวจ cache
-  const cached = localStorage.getItem('gh_gist_id');
-  if (cached) return cached;
-
-  // ค้นหา Gist ที่มีอยู่แล้ว
-  const res = await fetch(
-    'https://api.github.com/gists?per_page=100',
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-      },
-    }
-  );
-  const gists = await res.json();
-  const existing = gists.find(
-    (g: any) =>
-      g.description === GIST_DESC &&
-      g.files[GIST_FILENAME]
-  );
-
-  if (existing) {
-    localStorage.setItem('gh_gist_id', existing.id);
-    return existing.id;
-  }
-
-  // สร้าง Gist ใหม่
-  const create = await fetch(
-    'https://api.github.com/gists',
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        description: GIST_DESC,
-        public:      false,       // private gist
-        files: {
-          [GIST_FILENAME]: {
-            content: JSON.stringify({
-              version:   1,
-              projects:  [],
-              updatedAt: Date.now(),
-            } as GistData, null, 2),
-          },
-        },
-      }),
-    }
-  );
-  const newGist = await create.json();
-  localStorage.setItem('gh_gist_id', newGist.id);
-  return newGist.id;
-}
-
-// โหลดข้อมูลทั้งหมดจาก Gist
-export async function loadFromGist(
-  token: string,
-  gistId: string
-): Promise<GistData> {
-  const res = await fetch(
-    `https://api.github.com/gists/${gistId}`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'Cache-Control': 'no-cache',
-      },
-    }
-  );
-  const gist = await res.json();
-  const raw  = gist.files[GIST_FILENAME]?.content ?? '{}';
-  return JSON.parse(raw) as GistData;
-}
-
-// บันทึกข้อมูลทั้งหมดลง Gist
-export async function saveToGist(
-  token:  string,
-  gistId: string,
-  data:   GistData
-): Promise<void> {
-  await fetch(
-    `https://api.github.com/gists/${gistId}`,
-    {
-      method: 'PATCH',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github+json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        files: {
-          [GIST_FILENAME]: {
-            content: JSON.stringify(
-              { ...data, updatedAt: Date.now() },
-              null, 2
-            ),
-          },
-        },
-      }),
-    }
-  );
 }
 
 export function areProjectListsEqual(a: SerializedProject[], b: SerializedProject[]): boolean {
@@ -161,10 +48,10 @@ export function mergeProjects(
   const map = new Map<string, SerializedProject>();
 
   // 1. ใส่ local เข้า map ก่อน
-  local.forEach(p => map.set(p.id, p));
+  local.forEach((p) => map.set(p.id, p));
 
   // 2. พิจารณาโปรเจกต์จาก cloud
-  cloud.forEach(p => {
+  cloud.forEach((p) => {
     const existing = map.get(p.id);
     if (existing) {
       // ถ้ามีทั้งคู่ ให้เลือกตัวที่ updatedAt ใหม่กว่า
@@ -175,25 +62,18 @@ export function mergeProjects(
       // มีอยู่บน cloud แต่ไม่มีอยู่ใน local
       // ตรวจสอบว่าโดนลบออกไปใน local หรือเพิ่งถูกสร้างขึ้นบน cloud จากเครื่องอื่น
       if (p.updatedAt > localLastSyncTime) {
-        // อัปเดตใหม่กว่าเวลาซิงก์ล่าสุดบนเครื่องนี้ -> เป็นโปรเจกต์ที่สร้าง/อัปเดตใหม่ -> ดึงลง local
         map.set(p.id, p);
-      } else {
-        // เกิดขึ้น/ซิงก์ไปก่อนซิงก์ครั้งล่าสุดแต่หายไปใน local -> แสดงว่าผู้ใช้ลบใน local ไปแล้ว -> คงสถานะลบไว้
       }
     }
   });
 
   // 3. พิจารณาโปรเจกต์ local ที่ไม่มีอยู่บน cloud
-  const cloudIds = new Set(cloud.map(p => p.id));
-  local.forEach(p => {
+  const cloudIds = new Set(cloud.map((p) => p.id));
+  local.forEach((p) => {
     if (!cloudIds.has(p.id)) {
-      // มีใน local แต่ไม่มีใน cloud
-      // ตรวจสอบว่าถูกลบใน cloud จากเครื่องอื่น หรือเพิ่งสร้างใหม่ใน local เครื่องนี้
       if (p.updatedAt < cloudStorageUpdatedAt) {
-        // แก้ไขก่อนเวลาอัปเดตคลาวด์ล่าสุดแต่ไม่มีในคลาวด์ -> แสดงว่าถูกลบในคลาวด์จากเครื่องอื่น -> ลบออก
+        // แก้ไขก่อนเวลาอัปเดตคลาวด์ล่าสุดแต่ไม่มีในคลาวด์ -> แสดงว่าถูกลบในคลาวด์จากเครื่องอื่น
         map.delete(p.id);
-      } else {
-        // เพิ่งสร้าง/อัปเดตใหม่ในเครื่องนี้หลังจากคลาวด์อัปเดตล่าสุด -> โปรเจกต์ใหม่ -> คงไว้เพื่อเซฟขึ้นคลาวด์
       }
     }
   });
@@ -228,20 +108,20 @@ export async function loadLocalProjects(): Promise<SerializedProject[]> {
   const projs = await db.projects.toArray();
   const allFiles = await db.files.toArray();
   
-  return projs.map(p => {
-    const projFiles = allFiles.filter(f => f.project_id === p.id && f.type === 'file' && f.content !== undefined);
-    const filesRecord: Record<string, { content: string, mime_type: string, encoding?: 'base64' }> = {};
+  return projs.map((p) => {
+    const projFiles = allFiles.filter((f) => f.project_id === p.id && f.type === 'file' && f.content !== undefined);
+    const filesRecord: Record<string, { content: string; mime_type: string; encoding?: 'base64' }> = {};
     for (const f of projFiles) {
       if (f.content instanceof ArrayBuffer) {
         filesRecord[f.path] = {
           content: arrayBufferToBase64(f.content),
           mime_type: f.mime_type ?? 'application/octet-stream',
-          encoding: 'base64'
+          encoding: 'base64',
         };
       } else {
         filesRecord[f.path] = {
           content: (f.content as string) || '',
-          mime_type: f.mime_type ?? 'text/plain'
+          mime_type: f.mime_type ?? 'text/plain',
         };
       }
     }
@@ -252,7 +132,7 @@ export async function loadLocalProjects(): Promise<SerializedProject[]> {
       template: p.template,
       createdAt: p.created_at,
       updatedAt: p.updated_at,
-      files: filesRecord
+      files: filesRecord,
     };
   });
 }
@@ -264,13 +144,13 @@ export async function saveProjectToLocal(sp: SerializedProject): Promise<Project
     language: sp.language as any,
     template: sp.template,
     created_at: sp.createdAt,
-    updated_at: sp.updatedAt
+    updated_at: sp.updatedAt,
   };
   await db.projects.put(p);
   
-  // ลบไฟล์ใน Local ที่ไม่มีในคลาวด์ (ป้องกันไฟล์ผีที่ลบไปแล้วเด้งกลับมาหลัง Sync)
+  // ลบไฟล์ใน Local ที่ไม่มีในคลาวด์
   const localFiles = await db.files.where({ project_id: sp.id }).toArray();
-  const localPaths = localFiles.filter(f => f.type === 'file').map(f => f.path);
+  const localPaths = localFiles.filter((f) => f.type === 'file').map((f) => f.path);
   const cloudPaths = new Set(Object.keys(sp.files));
 
   for (const path of localPaths) {
@@ -298,7 +178,11 @@ export async function saveProjectToLocal(sp: SerializedProject): Promise<Project
     }
 
     if (existing) {
-       await db.files.where({ project_id: sp.id, path }).modify({ content: contentToSave, mime_type: fileData.mime_type, updated_at: sp.updatedAt });
+       await db.files.where({ project_id: sp.id, path }).modify({
+         content: contentToSave,
+         mime_type: fileData.mime_type,
+         updated_at: sp.updatedAt,
+       });
     } else {
        await db.files.add({
          project_id: sp.id,
@@ -309,7 +193,7 @@ export async function saveProjectToLocal(sp: SerializedProject): Promise<Project
          content: contentToSave,
          mime_type: fileData.mime_type,
          is_dirty: false,
-         updated_at: sp.updatedAt
+         updated_at: sp.updatedAt,
        });
     }
   }
@@ -318,19 +202,19 @@ export async function saveProjectToLocal(sp: SerializedProject): Promise<Project
 
 export async function serializeProject(p: Project): Promise<SerializedProject> {
   const allFiles = await db.files.where({ project_id: p.id }).toArray();
-  const projFiles = allFiles.filter(f => f.type === 'file' && f.content !== undefined);
-  const filesRecord: Record<string, { content: string, mime_type: string, encoding?: 'base64' }> = {};
+  const projFiles = allFiles.filter((f) => f.type === 'file' && f.content !== undefined);
+  const filesRecord: Record<string, { content: string; mime_type: string; encoding?: 'base64' }> = {};
   for (const f of projFiles) {
     if (f.content instanceof ArrayBuffer) {
       filesRecord[f.path] = {
         content: arrayBufferToBase64(f.content),
         mime_type: f.mime_type ?? 'application/octet-stream',
-        encoding: 'base64'
+        encoding: 'base64',
       };
     } else {
       filesRecord[f.path] = {
         content: (f.content as string) || '',
-        mime_type: f.mime_type ?? 'text/plain'
+        mime_type: f.mime_type ?? 'text/plain',
       };
     }
   }
@@ -341,8 +225,6 @@ export async function serializeProject(p: Project): Promise<SerializedProject> {
     template: p.template,
     createdAt: p.created_at,
     updatedAt: p.updated_at,
-    files: filesRecord
+    files: filesRecord,
   };
 }
-
-

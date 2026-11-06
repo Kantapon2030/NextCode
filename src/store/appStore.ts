@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import type { VFSState } from '../types';
 import { setFileAtPath, setFolderAtPath, deleteAtPath, moveNode, buildFlatIndex, buildCompatibilityMaps } from '../storage/vfsHelpers';
-import type { SupabaseUser } from '../services/supabase';
 
 export interface ConsoleEntry {
   id: string;
@@ -41,7 +40,6 @@ export type UserMode = 'beginner' | 'expert';
 
 interface AppState {
   user: User | null;
-  supabaseUser: SupabaseUser | null;
   accessToken: string | null;
   tokenExpiry: number | null;
   userMode: UserMode;
@@ -66,7 +64,6 @@ interface AppState {
   showMultiTabBanner: boolean;
 
   setUser: (user: User | null) => void;
-  setSupabaseUser: (user: SupabaseUser | null) => void;
   setAccessToken: (token: string | null, expiry: number | null) => void;
   setUserMode: (mode: UserMode) => void;
   setProjects: (projects: Project[]) => void;
@@ -107,7 +104,6 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set) => ({
   user: null,
-  supabaseUser: null,
   accessToken: null,
   tokenExpiry: null,
   userMode: 'beginner',
@@ -132,7 +128,6 @@ export const useAppStore = create<AppState>((set) => ({
   showMultiTabBanner: false,
 
   setUser: (user) => set({ user }),
-  setSupabaseUser: (supabaseUser) => set({ supabaseUser }),
   setAccessToken: (accessToken, tokenExpiry) => set({ accessToken, tokenExpiry }),
   setUserMode: (userMode) => set({ userMode }),
   setProjects: (projects) => set({ projects }),
@@ -272,7 +267,6 @@ export const useAppStore = create<AppState>((set) => ({
   logout: () =>
     set({
       user: null,
-      supabaseUser: null,
       accessToken: null,
       tokenExpiry: null,
       projects: [],

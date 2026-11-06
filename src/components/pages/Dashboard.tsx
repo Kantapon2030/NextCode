@@ -14,16 +14,12 @@ import {
   readDroppedItems, detectLanguage, isImage, isTextFile, getMimeType,
 } from '../../utils/folderImport';
 import {
-  getGitHubToken, fetchGitHubUser,
-} from '../../services/githubAuth';
-import {
-  getOrCreateGist, loadFromGist, saveToGist, mergeProjects,
+  mergeProjects,
   saveProjectToLocal, loadLocalProjects, serializeProject, areProjectListsEqual
 } from '../../services/gistStorage';
 import {
   getOrCreateDriveFile, loadFromDrive, saveToDrive
 } from '../../services/googleDriveStorage';
-import { GitHubLoginModal } from '../modals/GitHubLoginModal';
 import {
   Code2, Plus, Search, LogOut, Settings, Clock, Cloud, CloudOff, Loader2,
   Copy, Download, Trash2, FolderOpen, User, ChevronDown, X, Upload, FolderInput,
@@ -53,7 +49,7 @@ function relativeTime(ms: number): string {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { user, accessToken, projects, setProjects, addProject, removeProject, logout, theme, supabaseUser, currentProject, resetWorkspace, setCurrentProject, setSyncStatus, syncStatus } = useAppStore();
+  const { user, accessToken, projects, setProjects, addProject, removeProject, logout, theme, currentProject, resetWorkspace, setCurrentProject, setSyncStatus, syncStatus } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<string>('all');
@@ -65,7 +61,6 @@ export default function Dashboard() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState('');
-  const [showGhLogin, setShowGhLogin] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const avatarRef = useRef<HTMLDivElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -139,30 +134,6 @@ export default function Dashboard() {
         const errMsg = e instanceof Error ? e.message : String(e);
         setSyncError(errMsg);
       }
-    } else {
-      const token = getGitHubToken();
-      if (!token) return;
-      try {
-        const gistId = localStorage.getItem('gh_gist_id');
-        if (!gistId) return;
-        setSyncStatus('syncing');
-        
-        const serialized = [];
-        for (const p of targetProjects) {
-          serialized.push(await serializeProject(p));
-        }
-
-        await saveToGist(token, gistId, {
-          version: 1,
-          projects: serialized,
-          updatedAt: Date.now(),
-        });
-        setSyncStatus('synced');
-        localStorage.setItem('nextcode_last_sync_time', Date.now().toString());
-      } catch (e) {
-        console.error('GitHub save error:', e);
-        setSyncStatus('error');
-      }
     }
   };
 
@@ -214,53 +185,8 @@ export default function Dashboard() {
             setProjects(projs as any);
           }
         } else {
-          const token = getGitHubToken();
-          if (token) {
-            setSyncStatus('syncing');
-            try {
-              await fetchGitHubUser(token);
-              const gistId = await getOrCreateGist(token);
-              const data = await loadFromGist(token, gistId);
-
-              const localProjects = await loadLocalProjects();
-              const localLastSyncTime = parseInt(localStorage.getItem('nextcode_last_sync_time') || '0', 10);
-              const merged = mergeProjects(localProjects, data.projects || [], localLastSyncTime, data.updatedAt || 0);
-
-              const finalProjs = [];
-              for (const sp of merged) {
-                const p = await saveProjectToLocal(sp);
-                finalProjs.push(p);
-              }
-              
-              setProjects(finalProjs.sort((a,b) => b.updated_at - a.updated_at));
-              setSyncStatus('synced');
-
-              // เช็กว่ามีโปรเจกต์ที่ต้องอัปเดตขึ้น Cloud ไหม
-              const cloudProjects = data.projects || [];
-              const isSynced = areProjectListsEqual(merged, cloudProjects);
-              localStorage.setItem('nextcode_last_sync_time', Date.now().toString());
-
-              if (!isSynced) {
-                const mappedProjects = merged.map(p => ({
-                  id: p.id,
-                  name: p.name,
-                  language: p.language as any,
-                  template: p.template,
-                  created_at: p.createdAt,
-                  updated_at: p.updatedAt,
-                }));
-                await syncProjectsToCloud(mappedProjects);
-              }
-            } catch (e) {
-              console.error('GitHub Cloud sync error:', e);
-              setSyncStatus('error');
-              const projs = await db.projects.orderBy('updated_at').reverse().toArray();
-              setProjects(projs as any);
-            }
-          } else {
-            const projs = await db.projects.orderBy('updated_at').reverse().toArray();
-            setProjects(projs as any);
-          }
+          const projs = await db.projects.orderBy('updated_at').reverse().toArray();
+          setProjects(projs as any);
         }
       } finally {
         setLoading(false);
@@ -509,10 +435,6 @@ export default function Dashboard() {
     navigate('/');
   }
 
-  function handleConnectGitHub() {
-    setShowGhLogin(true);
-  }
-
   const bg = theme === 'dark' ? 'bg-surface-900' : 'bg-zinc-50';
   const surface = theme === 'dark' ? 'bg-surface-800 border-border' : 'bg-white border-zinc-200';
   const navBg = theme === 'dark' ? 'bg-surface-950/80 border-border' : 'bg-white/80 border-zinc-200';
@@ -562,7 +484,7 @@ export default function Dashboard() {
           โปรเจกต์ใหม่
         </button>
 
-        {(getGitHubToken() || accessToken) && (
+        {accessToken && (
           <button
             onClick={handleForceSync}
             disabled={syncStatus === 'syncing' || syncing}
@@ -609,15 +531,6 @@ export default function Dashboard() {
                 <p className="text-sm font-medium text-white truncate">{user?.name}</p>
                 <p className="text-xs text-zinc-500 truncate">{user?.email}</p>
               </div>
-              {!getGitHubToken() && (
-                <button
-                  onClick={() => { handleConnectGitHub(); setAvatarMenu(false); }}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-zinc-300 hover:bg-surface-700 transition-colors border-b border-border"
-                >
-                  <Cloud className="w-4 h-4" />
-                  เชื่อมต่อ GitHub (Cloud)
-                </button>
-              )}
               <button
                 onClick={handleLogout}
                 className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-400 hover:bg-red-900/20 transition-colors"
@@ -914,15 +827,6 @@ export default function Dashboard() {
 
       {showNew && <NewProjectModal onClose={() => setShowNew(false)} />}
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} />}
-      {showGhLogin && (
-        <GitHubLoginModal
-          onSuccess={() => {
-            setShowGhLogin(false);
-            window.location.reload();
-          }}
-          onSkip={() => setShowGhLogin(false)}
-        />
-      )}
       {showConflictModal && (
         <ConflictResolverModal
           conflicts={conflicts}

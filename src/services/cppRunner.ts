@@ -41,8 +41,7 @@ export function stripAnsi(str: string): string {
 /**
  * Clean raw GCC stderr for display in the terminal:
  * 1. Strip ANSI escape codes
- * 2. Remove "source snippet" lines GCC adds for context (they show header
- *    content instead of user code when #line directives are involved)
+ * 2. Remove "source snippet" lines GCC adds for context
  * 3. Adjust line numbers by subtracting the instrumentation header line count
  */
 function cleanGccStderr(raw: string, headerLines: number): string {
@@ -72,7 +71,6 @@ function parseGccErrors(cleanStderr: string): CompileError[] {
   if (!cleanStderr) return [];
   const errors: CompileError[] = [];
   for (const line of cleanStderr.split('\n')) {
-    // Format: <source>:4:29: error: expected ';' before 'return'
     const m = line.match(/^[^:]+:(\d+):(\d+)?:\s*(error|warning|note):\s*(.+)$/);
     if (m) {
       const severity = m[3] === 'warning' ? 'warning' : 'error';
@@ -101,6 +99,7 @@ function processRunResult(
 
   if (
     status === 99 ||
+    status === 134 ||
     status === 139 ||
     stderr.includes('std::__ios_failure') ||
     stderr.includes('basic_ios::clear') ||
@@ -140,18 +139,18 @@ function processRunResult(
  */
 function buildHeader(language: 'c' | 'cpp'): { code: string; lines: number } {
   if (language === 'c') {
-    // Pure C header – no C++ at all, avoiding any #ifdef __cplusplus ambiguity
+    // Pure C header – unbuffers stdout and catches EOF on input to trigger waiting
     const lines = [
       '#include <stdio.h>',
       '#include <stdlib.h>',
+      '__attribute__((constructor)) static void _nextcode_init_stdout() { setvbuf(stdout, NULL, _IONBF, 0); }',
       '#define scanf(fmt, ...) ({ int _r = scanf(fmt, ##__VA_ARGS__); if (_r == EOF) exit(99); _r; })',
       '#define getchar() ({ int _c = getchar(); if (_c == EOF) exit(99); _c; })',
       '#define fgets(str, n, stream) ({ char* _r = fgets(str, n, stream); if (_r == NULL) exit(99); _r; })',
-      '#define gets(str) ({ char* _r = gets(str); if (_r == NULL) exit(99); _r; })',
     ];
     return { code: lines.join('\n') + '\n', lines: lines.length };
   } else {
-    // Pure C++ header
+    // Pure C++ header – unbuffers cout and throws exception on cin EOF
     const lines = [
       '#include <iostream>',
       '#include <exception>',
@@ -172,13 +171,12 @@ export async function compileAndRun(
   const options = language === 'c' ? '-O2 -Wall -std=c11' : '-O2 -Wall -std=c++17';
   const inputsUsed = stdin.split('\n').map(l => l.trim()).filter(l => l !== '');
 
-  // Language-specific instrumentation header (no #ifdef __cplusplus)
+  // Language-specific instrumentation header
   const { code: headerCode, lines: headerLines } = buildHeader(language);
   const instrumentedCode = headerCode + code;
 
   // ─── Primary: Godbolt API ────────────────────────────────────────────────
   try {
-    // Use the most recent stable GCC version available on Godbolt
     const compilerId = language === 'c' ? 'cg132' : 'g132';
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -237,50 +235,10 @@ export async function compileAndRun(
     const status = didExecute ? data.code : -1;
     return processRunResult(stdout, stderr, status, inputsUsed, errors, compileError);
   } catch (primaryErr) {
-    console.warn('[cppRunner] Godbolt failed, trying Piston as fallback:', primaryErr);
+    console.warn('[cppRunner] Godbolt failed, trying Wandbox as fallback:', primaryErr);
   }
 
-  // ─── Fallback 1: Piston API ────────────────────────────────────────────────
-  try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20000);
-
-    const pistonLang = language === 'c' ? 'c' : 'cpp';
-    const filename = language === 'c' ? 'main.c' : 'main.cpp';
-
-    const res = await fetch('https://emkc.org/api/v2/piston/execute', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: controller.signal,
-      body: JSON.stringify({
-        language: pistonLang,
-        version: '*',
-        files: [{ name: filename, content: instrumentedCode }],
-        stdin,
-      }),
-    });
-    clearTimeout(timeout);
-
-    if (!res.ok) throw new Error(`Piston HTTP ${res.status}`);
-
-    const data = await res.json() as {
-      run?: { stdout?: string; stderr?: string; code?: number };
-    };
-
-    if (data.run) {
-      const stdout = stripAnsi(data.run.stdout ?? '');
-      const rawStderr = data.run.stderr ?? '';
-      const cleaned = cleanGccStderr(rawStderr, headerLines);
-      const status = data.run.code ?? 0;
-      const errors = parseGccErrors(cleaned);
-      return processRunResult(stdout, cleaned, status, inputsUsed, errors);
-    }
-    throw new Error('Piston invalid response format');
-  } catch (pistonErr) {
-    console.warn('[cppRunner] Piston failed, trying Wandbox as fallback:', pistonErr);
-  }
-
-  // ─── Fallback 2: Wandbox ─────────────────────────────────────────────────
+  // ─── Fallback: Wandbox API ─────────────────────────────────────────────────
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
@@ -325,5 +283,3 @@ export async function compileAndRun(
     throw new Error('COMPILER_UNAVAILABLE');
   }
 }
-
-

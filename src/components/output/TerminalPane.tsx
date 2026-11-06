@@ -6,7 +6,7 @@ import { getTerminalHistory, saveTerminalHistory } from '../../storage/db';
 import type { TerminalEntry } from '../../store/appStore';
 import { useAppStore } from '../../store/appStore';
 import {
-  initPyodideWorker, runPythonCode,
+  initPyodideWorker, runPythonCode, isPyodideReady,
   sendInputToWorker, stopPythonWorker,
   terminatePyodideWorker,
 } from '../../services/pyodideRunner';
@@ -137,7 +137,7 @@ export const TerminalPane: React.FC<Props> = ({
       smartAppend('▶ กำลังเตรียม Python runtime...', 'info');
 
       // init worker ถ้ายังไม่มี
-      if (!workerInitialized.current) {
+      if (!isPyodideReady()) {
         await initPyodideWorker(
           // onOutput
           (text, type) => {

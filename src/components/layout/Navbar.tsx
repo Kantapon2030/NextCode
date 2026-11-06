@@ -12,7 +12,6 @@ import {
 import JSZip from 'jszip';
 import { saveAs } from 'file-saver';
 import { db } from '../../storage/db';
-import { getGitHubToken } from '../../services/githubAuth';
 import { forceCloudSync } from '../../services/cloudSync';
 import { ConflictResolverModal } from '../modals/ConflictResolverModal';
 
@@ -54,7 +53,12 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
       toast('success', '✓ ซิงก์ข้อมูลขึ้นคลาวด์เสร็จสมบูรณ์');
     } catch (err) {
       console.error(err);
-      toast('error', '❌ ซิงก์ข้อมูลล้มเหลว: ' + (err instanceof Error ? err.message : String(err)));
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('AUTH_EXPIRED') || msg.includes('Status 401')) {
+        toast('error', '⚠️ เซสชัน Google หมดอายุแล้ว กรุณาเข้าสู่ระบบใหม่อีกครั้ง');
+      } else {
+        toast('error', '❌ ซิงก์ข้อมูลล้มเหลว: ' + msg);
+      }
     } finally {
       setSyncing(false);
     }
@@ -174,7 +178,7 @@ export function Navbar({ onSave, onToggleCommandPalette }: Props) {
 
         <div className="flex-1" />
 
-        {(getGitHubToken() || accessToken) && (
+        {accessToken && (
           <button
             onClick={handleForceSync}
             disabled={syncStatus === 'syncing' || syncing}

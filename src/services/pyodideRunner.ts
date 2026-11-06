@@ -9,10 +9,15 @@ interface PyodideWorkerSession {
   worker:       Worker;
   sharedBuffer: SharedArrayBuffer | null;
   statusArray:  Int32Array | null;
+  inputArray:   Uint16Array | null;
 }
 
 let session: PyodideWorkerSession | null = null;
 let workerReady = false;
+
+export function isPyodideReady(): boolean {
+  return session !== null && workerReady;
+}
 
 // สร้าง Worker + SharedArrayBuffer ครั้งเดียว
 export async function initPyodideWorker(
@@ -32,11 +37,15 @@ export async function initPyodideWorker(
   const hasSharedBuffer = typeof SharedArrayBuffer !== 'undefined';
   let sharedBuffer: SharedArrayBuffer | null = null;
   let statusArray: Int32Array | null = null;
+  let inputArray: Uint16Array | null = null;
 
   if (hasSharedBuffer) {
-    // SharedArrayBuffer: 4 bytes status + 1024 bytes input
-    sharedBuffer = new SharedArrayBuffer(4 + 1024);
+    // SharedArrayBuffer 4096 bytes:
+    // [0..3] = status (Int32Array at byte offset 0, length 1)
+    // [16..2063] = input characters (Uint16Array at byte offset 16, length 1024)
+    sharedBuffer = new SharedArrayBuffer(4096);
     statusArray  = new Int32Array(sharedBuffer, 0, 1);
+    inputArray   = new Uint16Array(sharedBuffer, 16, 1024);
     Atomics.store(statusArray, 0, 0);
   } else {
     // แจ้งเตือนสั้นๆ เป็น Info
@@ -71,7 +80,7 @@ export async function initPyodideWorker(
     onOutput(`Worker error: ${err.message}`, 'error');
   };
 
-  session = { worker, sharedBuffer, statusArray };
+  session = { worker, sharedBuffer, statusArray, inputArray };
 
   // init worker
   worker.postMessage({
@@ -87,14 +96,37 @@ export function runPythonCode(code: string): void {
 
 export function sendInputToWorker(value: string): void {
   if (!session) return;
-  session.worker.postMessage({
-    type: 'SEND_INPUT', payload: { value }
-  });
+  if (session.statusArray && session.inputArray) {
+    // ป้อนค่าลง SharedArrayBuffer โดยตรงจาก Main Thread
+    session.inputArray.fill(0);
+    const chars = value.split('').map((c) => c.charCodeAt(0));
+    chars.forEach((c, i) => {
+      if (i < session!.inputArray!.length - 1) {
+        session!.inputArray![i] = c;
+      }
+    });
+
+    // เซ็ต status = 2 (input_ready) และปลุก Worker ที่รออยู่ใน Atomics.wait ทันที
+    Atomics.store(session.statusArray, 0, 2);
+    Atomics.notify(session.statusArray, 0, 1);
+  } else {
+    session.worker.postMessage({
+      type: 'SEND_INPUT',
+      payload: { value },
+    });
+  }
 }
 
 export function stopPythonWorker(): void {
   if (!session) return;
-  session.worker.postMessage({ type: 'STOP' });
+  if (session.statusArray && session.inputArray) {
+    session.inputArray.fill(0);
+    Atomics.store(session.statusArray, 0, 2);
+    Atomics.notify(session.statusArray, 0, 1);
+  }
+  session.worker.terminate();
+  session = null;
+  workerReady = false;
 }
 
 export function terminatePyodideWorker(): void {
