@@ -14,83 +14,122 @@ interface PyodideWorkerSession {
 
 let session: PyodideWorkerSession | null = null;
 let workerReady = false;
+let initPromise: Promise<void> | null = null;
+
+let currentOnOutput: OutputHandler = () => {};
+let currentOnWaitingInput: WaitingInputHandler = () => {};
+let currentOnReady: (() => void) | null = null;
+let currentOnDone: (exitCode: number) => void = () => {};
 
 export function isPyodideReady(): boolean {
   return session !== null && workerReady;
 }
 
-// สร้าง Worker + SharedArrayBuffer ครั้งเดียว
-export async function initPyodideWorker(
+export function updatePyodideHandlers(
+  onOutput: OutputHandler,
+  onWaitingInput: WaitingInputHandler,
+  onDone: (exitCode: number) => void
+): void {
+  currentOnOutput = onOutput;
+  currentOnWaitingInput = onWaitingInput;
+  currentOnDone = onDone;
+}
+
+// สร้าง Worker + SharedArrayBuffer และรอจนกว่า Pyodide จะพร้อมทำงาน
+export function initPyodideWorker(
   onOutput: OutputHandler,
   onWaitingInput: WaitingInputHandler,
   onReady: () => void,
   onDone: (exitCode: number) => void
 ): Promise<void> {
+  currentOnOutput = onOutput;
+  currentOnWaitingInput = onWaitingInput;
+  currentOnReady = onReady;
+  currentOnDone = onDone;
 
-  // terminate worker เก่า
-  if (session) {
-    session.worker.terminate();
-    session = null;
-    workerReady = false;
+  if (session && workerReady) {
+    onReady();
+    return Promise.resolve();
   }
 
-  const hasSharedBuffer = typeof SharedArrayBuffer !== 'undefined';
-  let sharedBuffer: SharedArrayBuffer | null = null;
-  let statusArray: Int32Array | null = null;
-  let inputArray: Uint16Array | null = null;
-
-  if (hasSharedBuffer) {
-    // SharedArrayBuffer 4096 bytes:
-    // [0..3] = status (Int32Array at byte offset 0, length 1)
-    // [16..2063] = input characters (Uint16Array at byte offset 16, length 1024)
-    sharedBuffer = new SharedArrayBuffer(4096);
-    statusArray  = new Int32Array(sharedBuffer, 0, 1);
-    inputArray   = new Uint16Array(sharedBuffer, 16, 1024);
-    Atomics.store(statusArray, 0, 0);
-  } else {
-    // แจ้งเตือนสั้นๆ เป็น Info
-    onOutput(
-      'ℹ️ คำเตือน: เบราว์เซอร์นี้ไม่รองรับ SharedArrayBuffer (ไม่ได้เปิดผ่าน HTTPS/localhost หรือขาด COOP/COEP headers)\n' +
-      '👉 คุณยังคงรันโค้ด Python ทั่วไปได้ปกติ แต่จะไม่สามารถใช้คำสั่ง input() เพื่อรับค่าจากคีย์บอร์ดได้\n\n',
-      'info'
-    );
+  if (initPromise) {
+    return initPromise;
   }
 
-  const worker = new Worker('/pythonWorker.js');
-
-  worker.onmessage = (e) => {
-    const { type, text, outputType, prompt, exitCode } = e.data;
-
-    if (type === 'READY') {
-      workerReady = true;
-      onReady();
+  initPromise = new Promise<void>((resolve, reject) => {
+    if (session) {
+      session.worker.terminate();
+      session = null;
+      workerReady = false;
     }
-    else if (type === 'OUTPUT') {
-      onOutput(text ?? '', outputType ?? 'output');
-    }
-    else if (type === 'WAITING_INPUT') {
-      onWaitingInput(prompt ?? '');
-    }
-    else if (type === 'DONE') {
-      onDone(exitCode ?? 0);
-    }
-  };
 
-  worker.onerror = (err) => {
-    onOutput(`Worker error: ${err.message}`, 'error');
-  };
+    const hasSharedBuffer = typeof SharedArrayBuffer !== 'undefined';
+    let sharedBuffer: SharedArrayBuffer | null = null;
+    let statusArray: Int32Array | null = null;
+    let inputArray: Uint16Array | null = null;
 
-  session = { worker, sharedBuffer, statusArray, inputArray };
+    if (hasSharedBuffer) {
+      // SharedArrayBuffer 4096 bytes:
+      // [0..3] = status (Int32Array at byte offset 0, length 1)
+      // [16..2063] = input characters (Uint16Array at byte offset 16, length 1024)
+      sharedBuffer = new SharedArrayBuffer(4096);
+      statusArray  = new Int32Array(sharedBuffer, 0, 1);
+      inputArray   = new Uint16Array(sharedBuffer, 16, 1024);
+      Atomics.store(statusArray, 0, 0);
+    } else {
+      currentOnOutput(
+        'ℹ️ คำเตือน: เบราว์เซอร์นี้ไม่รองรับ SharedArrayBuffer (ไม่ได้เปิดผ่าน HTTPS/localhost หรือขาด COOP/COEP headers)\n' +
+        '👉 คุณยังคงรันโค้ด Python ทั่วไปได้ปกติ แต่จะไม่สามารถใช้คำสั่ง input() เพื่อรับค่าจากคีย์บอร์ดได้\n\n',
+        'info'
+      );
+    }
 
-  // init worker
-  worker.postMessage({
-    type: 'INIT',
-    payload: { sharedBuffer, hasSharedBuffer },
+    const worker = new Worker('/pythonWorker.js');
+
+    worker.onmessage = (e) => {
+      const { type, text, outputType, prompt, exitCode } = e.data;
+
+      if (type === 'READY') {
+        workerReady = true;
+        initPromise = null;
+        if (currentOnReady) currentOnReady();
+        resolve();
+      }
+      else if (type === 'OUTPUT') {
+        currentOnOutput(text ?? '', outputType ?? 'output');
+      }
+      else if (type === 'WAITING_INPUT') {
+        currentOnWaitingInput(prompt ?? '');
+      }
+      else if (type === 'DONE') {
+        currentOnDone(exitCode ?? 0);
+      }
+    };
+
+    worker.onerror = (err) => {
+      initPromise = null;
+      workerReady = false;
+      currentOnOutput(`Worker error: ${err.message}`, 'error');
+      reject(err);
+    };
+
+    session = { worker, sharedBuffer, statusArray, inputArray };
+
+    // init worker
+    worker.postMessage({
+      type: 'INIT',
+      payload: { sharedBuffer, hasSharedBuffer },
+    });
   });
+
+  return initPromise;
 }
 
 export function runPythonCode(code: string): void {
-  if (!session || !workerReady) return;
+  if (!session || !workerReady) {
+    console.error('Cannot run Python code: worker not ready');
+    return;
+  }
   session.worker.postMessage({ type: 'RUN', payload: { code } });
 }
 
@@ -118,6 +157,9 @@ export function sendInputToWorker(value: string): void {
 }
 
 export function stopPythonWorker(): void {
+  if (initPromise) {
+    initPromise = null;
+  }
   if (!session) return;
   if (session.statusArray && session.inputArray) {
     session.inputArray.fill(0);
@@ -130,6 +172,9 @@ export function stopPythonWorker(): void {
 }
 
 export function terminatePyodideWorker(): void {
+  if (initPromise) {
+    initPromise = null;
+  }
   session?.worker.terminate();
   session      = null;
   workerReady  = false;

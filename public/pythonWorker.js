@@ -29,15 +29,15 @@ self.onmessage = async (e) => {
       indexURL: 'https://cdn.jsdelivr.net/pyodide/v0.26.0/full/',
     });
 
-    // capture stdout/stderr
+    // capture stdout/stderr (batched ส่งข้อความแบบแยกบรรทัดมาให้ จึงเติม \n เพื่อให้แสดงผลขึ้นบรรทัดใหม่)
     pyodide.setStdout({
       batched: (text) => {
-        self.postMessage({ type: 'OUTPUT', text, outputType: 'output' });
+        self.postMessage({ type: 'OUTPUT', text: text + '\n', outputType: 'output' });
       }
     });
     pyodide.setStderr({
       batched: (text) => {
-        self.postMessage({ type: 'OUTPUT', text, outputType: 'error' });
+        self.postMessage({ type: 'OUTPUT', text: text + '\n', outputType: 'error' });
       }
     });
 
@@ -52,13 +52,8 @@ def _blocking_input(prompt=''):
     บล็อก Worker thread รอ input จาก main thread
     ผ่าน SharedArrayBuffer + Atomics
     """
-    if prompt:
-        import sys
-        sys.stdout.write(str(prompt))
-        sys.stdout.flush()
-
-    # บอก main thread ว่ากำลังรอ input
-    js._notify_waiting_input(str(prompt) if prompt else '')
+    # ส่ง prompt ไปแสดงที่ terminal ทันที และบอก main thread ว่ากำลังรอ input
+    js._notify_waiting_input(str(prompt) if prompt is not None else '')
 
     # Atomics.wait — บล็อก thread จนกว่า status = 2
     # (main thread จะ set 2 และ Atomics.notify เมื่อผู้ใช้ส่งค่า)
@@ -83,6 +78,10 @@ builtins.input = _blocking_input
 
       // วาง JS helpers ใน Python namespace
       pyodide.globals.set('_notify_waiting_input', (prompt) => {
+        // ถ้ามี prompt ให้ส่งออกเป็น OUTPUT ทันที (ไม่ใส่ \n เพื่อให้ input box อยู่ในบรรทัดเดียวกัน)
+        if (prompt) {
+          self.postMessage({ type: 'OUTPUT', text: prompt, outputType: 'output' });
+        }
         // set status = 1 (waiting)
         Atomics.store(statusArray, 0, 1);
         self.postMessage({ type: 'WAITING_INPUT', prompt: prompt || '' });
@@ -133,7 +132,7 @@ builtins.input = _fallback_input
       await pyodide.loadPackagesFromImports(code, {
         messageCallback: (msg) => {
           isPackageDownloading = true;
-          self.postMessage({ type: 'OUTPUT', text: `📦 ${msg}`, outputType: 'info' });
+          self.postMessage({ type: 'OUTPUT', text: `📦 ${msg}\n`, outputType: 'info' });
         },
       });
       if (isPackageDownloading) {
@@ -156,7 +155,7 @@ builtins.input = _fallback_input
         )
         .join('\n')
         .trim();
-      self.postMessage({ type: 'OUTPUT', text: msg, outputType: 'error' });
+      self.postMessage({ type: 'OUTPUT', text: msg ? msg + '\n' : '', outputType: 'error' });
       self.postMessage({ type: 'DONE', exitCode: 1 });
     }
   }
@@ -172,7 +171,7 @@ builtins.input = _fallback_input
       });
 
       Atomics.store(statusArray, 0, 2);
-      Atomics.notify(statusArray, 0);
+      Atomics.notify(statusArray, 0, 1);
     }
   }
 
@@ -181,7 +180,7 @@ builtins.input = _fallback_input
       // force unblock ด้วย empty input
       inputArray.fill(0);
       Atomics.store(statusArray, 0, 2);
-      Atomics.notify(statusArray, 0);
+      Atomics.notify(statusArray, 0, 1);
     }
   }
 };

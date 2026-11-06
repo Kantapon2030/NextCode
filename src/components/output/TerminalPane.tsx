@@ -7,7 +7,7 @@ import type { TerminalEntry } from '../../store/appStore';
 import { useAppStore } from '../../store/appStore';
 import {
   initPyodideWorker, runPythonCode, isPyodideReady,
-  sendInputToWorker, stopPythonWorker,
+  sendInputToWorker, stopPythonWorker, updatePyodideHandlers,
   terminatePyodideWorker,
 } from '../../services/pyodideRunner';
 import {
@@ -136,40 +136,65 @@ export const TerminalPane: React.FC<Props> = ({
       setPhase('initializing');
       smartAppend('▶ กำลังเตรียม Python runtime...', 'info');
 
-      // init worker ถ้ายังไม่มี
-      if (!isPyodideReady()) {
-        await initPyodideWorker(
-          // onOutput
-          (text, type) => {
-            smartAppendRef.current(text, type as TerminalEntry['type']);
-          },
-          // onWaitingInput — โปรแกรมรอรับค่า
-          () => {
-            setIsWaiting(true);
-            setPhase('waiting');
-          },
-          // onReady
-          () => {
-            workerInitialized.current = true;
-            smartAppendRef.current('Python พร้อมแล้ว', 'info');
-          },
-          // onDone
-          (exitCode) => {
-            setIsWaiting(false);
-            setPhase('done');
-            smartAppendRef.current(
-              exitCode === 0
-                ? '✓ เสร็จสิ้น'
-                : `✗ exit: ${exitCode}`,
-              exitCode === 0 ? 'info' : 'error'
-            );
-          }
-        );
-        workerInitialized.current = true;
-      }
+      try {
+        // init worker ถ้ายังไม่มี (จะรอจนกว่า Pyodide จะพร้อมทำงานจริง)
+        if (!isPyodideReady()) {
+          await initPyodideWorker(
+            // onOutput
+            (text, type) => {
+              smartAppendRef.current(text, type as TerminalEntry['type']);
+            },
+            // onWaitingInput — โปรแกรมรอรับค่า
+            () => {
+              setIsWaiting(true);
+              setPhase('waiting');
+            },
+            // onReady
+            () => {
+              workerInitialized.current = true;
+              smartAppendRef.current('Python พร้อมแล้ว\n', 'info');
+            },
+            // onDone
+            (exitCode) => {
+              setIsWaiting(false);
+              setPhase('done');
+              smartAppendRef.current(
+                exitCode === 0
+                  ? '✓ เสร็จสิ้น'
+                  : `✗ exit: ${exitCode}`,
+                exitCode === 0 ? 'info' : 'error'
+              );
+            }
+          );
+          workerInitialized.current = true;
+        } else {
+          updatePyodideHandlers(
+            (text, type) => {
+              smartAppendRef.current(text, type as TerminalEntry['type']);
+            },
+            () => {
+              setIsWaiting(true);
+              setPhase('waiting');
+            },
+            (exitCode) => {
+              setIsWaiting(false);
+              setPhase('done');
+              smartAppendRef.current(
+                exitCode === 0
+                  ? '✓ เสร็จสิ้น'
+                  : `✗ exit: ${exitCode}`,
+                exitCode === 0 ? 'info' : 'error'
+              );
+            }
+          );
+        }
 
-      setPhase('running');
-      runPythonCode(code);
+        setPhase('running');
+        runPythonCode(code);
+      } catch (err: any) {
+        setPhase('idle');
+        smartAppend(`เกิดข้อผิดพลาดในการโหลด Python: ${err?.message || err}`, 'error');
+      }
     }
 
     // ── C / C++ ───────────────────────────────────────
